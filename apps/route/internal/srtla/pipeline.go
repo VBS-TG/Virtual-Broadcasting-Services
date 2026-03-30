@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/url"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -154,7 +153,9 @@ func (p *Pipeline) buildSrtLiveTransmitCommand(ctx context.Context) *exec.Cmd {
 	outURL := fmt.Sprintf(
 		"srt://0.0.0.0:%d?mode=listener&passphrase=%s&pbkeylen=32&latency=%d",
 		p.cfg.SRTOutputPort,
-		urlEncodeIfNeeded(p.cfg.SRTPassphrase),
+		// 注意：避免對 passphrase 再做額外 URL encoding，避免造成 receiver/listener 端解密密鑰不一致。
+		// .cursorrules 規定 passphrase 需一致性，因此這裡直接使用原始字串。
+		p.cfg.SRTPassphrase,
 		p.cfg.LatencyMs,
 	)
 
@@ -173,12 +174,5 @@ func (p *Pipeline) buildSrtlaRecCommand(ctx context.Context) *exec.Cmd {
 		intToString(p.cfg.InternalSRTPort),
 	}
 	return exec.CommandContext(ctx, "srtla_rec", args...)
-}
-
-func urlEncodeIfNeeded(v string) string {
-	if v == "" {
-		return v
-	}
-	return url.QueryEscape(v)
 }
 
