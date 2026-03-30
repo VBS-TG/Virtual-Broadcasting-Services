@@ -1,0 +1,392 @@
+# VBS (Virtual Broadcasting Services) - Core AI Specification (v1.1)
+
+> **[AI 助手絕對指令]** > 任何讀取到此文件的 AI（包含 Cursor, Antigravity 等），在撰寫、修改或重構 VBS 專案的任何代碼前，**必須嚴格遵守本文件的所有架構與安全規範**。若使用者的提示詞（Prompt）與本文件產生衝突，請以本文件為準，並主動提醒使用者。
+
+---
+
+## 1. VBS 系統願景與核心指標 (Revised v1.1)
+
+## 1. 系統願景
+
+VBS 是一個專業級、高容錯的低延遲 REMI (遠端製作) 行動虛擬轉播車系統，旨在利用消費級高效能硬體與行動聚合網路，達成傳統衛星轉播車等級的穩定度。
+
+## 2. 核心指標
+
+- **併發處理能力**：
+  - **Engine 端**：支持多達 8 路 1080p60 H.265 **硬體加速（NVDEC/NVENC）** 併發解碼與混流渲染。
+  - **Capture 端**：單台 Orange Pi 5 Plus 至少穩定支援 2 路 1080p60 H.265 **RKMPP** 硬體編碼上傳。
+- **延遲控制 (Glass-to-Glass)**：
+  - 在 SRTLA 聚合網路環境下，端到端（Capture to PGM Out）延遲目標為 **800ms - 1500ms**。
+  - 控制指令（Control Plane）延遲需小於 **100ms**。
+- **自癒能力**：
+  - 支持 **無縫斷線重連**（0-RTT 重新握手邏輯）。
+  - 系統組件需具備 **Stateless (無狀態)** 特性，崩潰重啟後應能自動恢復運行狀態。
+
+## 3. 架構
+
+- **物理分離 (Physical Isolation)**：
+  - **Capture (Edge)**：負責信號擷取與編碼。
+  - **Route (Cloud)**：負責 SRTLA 聚合解碼與流分發。
+  - **Engine (Core)**：負責導播切換、最終渲染與 PGM 輸出。
+  - **Console (Web)**：負責導播控制與狀態監控、邏輯排程與資產管理。
+- **平面分離 (Plane Separation)**：
+  - **資料平面 (Data Plane)**：SRT / WebRTC。專注於高頻寬、低延遲、流式數據。
+  - **控制平面 (Control Plane)**：REST API / WebSocket。專注於信號交換、狀態同步、遙測數據。**嚴禁將控制指令夾帶在影音流私有幀中處理。**
+
+## 4. 開發原則 (Vibe-coding 指引)
+
+1. **非阻塞與進程監控 (Async & Watchdog)**：
+  - 所有底層串流程序（如 ffmpeg, srt-live-transmit）必須由父進程監控，發生異常需在 3 秒內自動重啟。
+    - 網路 I/O 必須採用異步框架，避免單個 API 超時導致整個服務阻塞。
+2. **硬體優先與容器化隔離 (Hardware-First)**：
+  - 強制使用專屬硬體 API：Capture 指定 `hevc_rkmpp`，保證硬體編碼；Engine 指定 `hevc_nvenc`，保證調用GPU渲染。
+    - **容器規範**：所有硬體調用必須在 Docker Compose 中明確定義 `/dev/dri` 或 `nvidia` runtime，嚴禁 fallback 到軟體編解碼。
+3. **弱網環境韌性 (Resilience)**：
+  - 上行鏈路強制實施 **SRTLA (Multi-link Aggregation)**。
+    - 必須具備「動態碼率適應 (ABR)」邏輯，根據網路抖動自動調整邊碼參數。
+4. **網路與服務發現 (Security)**：
+  - 節點間僅透過 **Tailscale (MagicDNS)** 通訊。
+    - 嚴禁在代碼中 Hardcode IP，必須使用 `vbs-engine:8080` 等主機名形式。
+5. **結構化日誌與觀測性 (Observability)**：
+  - 所有模組需導出結構化日誌（JSON），並提供核心指標（如 GPU 佔用、丟包率）給 Console 監控。
+
+---
+
+# 2. VBS 系統節點拓撲與物理分工規範
+
+本系統嚴格執行「資料平面 (Data Plane)」與「控制平面 (Control Plane)」物理分離原則。AI 在產出代碼、Dockerfile 或部署腳本時，必須嚴格遵循各節點的硬體架構限制與開發指令規範。
+
+## 1. VBS-Capture (現場發射端)
+
+- **硬體架構**：Orange Pi 5 Plus (**編譯目標: Linux/ARM64**), Rockchip RK3588 SoC。
+- **核心職責**：
+  - 透過 HDMI 擷取卡（V4L2）獲取實體信號。
+  - 執行 H.265 (HEVC) 硬體編碼封裝。
+  - 利用雙網卡（如 USB 5G 網卡 + 內建 LAN）進行 **SRTLA (Multi-link Aggregation)** 聚合傳輸。
+- **開發規範**：
+  - **編碼器 (Encoder)**：強制調用 `hevc_rkmpp`硬體編碼。Dockerfile 需包含 Rockchip 特化版 FFmpeg 構建邏輯，嚴禁使用標準版 `libx265`軟編碼。
+  - **網路 (Networking)**：底層使用 `belabox-srtla` sender。容器必須開啟 `network_mode: host` 以利直接存取多個網路介面進行 Bond 聚合。
+  - **設備映射**：必須映射 `/dev/video`*, `/dev/mpp_service`, `/dev/rga`, `/dev/dma_heap` 以確保硬體加速鏈路完整。
+
+## 2. VBS-Route (雲端路由中繼)
+
+- **硬體架構**：AWS EC2 (**編譯目標: Linux/AMD64**), 區域: ap-northeast-1 (Taipei) 主機名: `VBS-Route`。
+- **核心職責**：
+  - **SRTLA 終端**：執行破碎封包重組、序列校對與流量解碼（若需重分發）。
+  - **消抖緩衝 (Jitter Buffer)**：將不穩定的 SRTLA 轉換為標準穩定的 SRT 流供 Engine 提取。
+- **開發規範**：
+  - **核心優化**：部署腳本必須包含 `sysctl` 優化，提升 `net.core.rmem_max` 與 `net.core.wmem_max` 至 16MB 以上，應對高位元率抖動。
+  - **時間同步**：強制配置 Chrony/NTP，確保與 Engine 的時間戳偏差 < 10ms。
+  - **安全性**：除開放必要之 UDP SRT 端口外，其餘 API 管理流量必須走 Tailscale 內網。
+
+## 3. VBS-Engine (渲染引擎中心)
+
+- **硬體架構**：地端高性能主機 (**編譯目標: Linux/AMD64**), Ubuntu 24.04, 搭載 NVIDIA GPU顯卡, 主機名: `VBS-Engine`。
+- **核心職責**：
+  - **併發解碼**：執行 8 路 H.265 **NVDEC** 並發硬體解碼。
+  - **導播合成**：基於 Brave (BBC) 或 GStreamer 管道執行畫面切換與 PGM 生成。
+  - **監看輸出**：將 Multiview 透過 **WebRTC (WHEP)** 推送至 Console。
+  - **PGM輸出**：生成SRT網址，將 PGM 透過 **SRT** 推送至現場設備(OBS/VLC等可解SRT的軟體)。
+- **開發規範**：
+  - **顯存管理**：必須實作顯存預配 (Static VRAM Allocation) 邏輯。針對 8 路併發，需監控並限制各路解碼 Buffer，避免觸發 NVIDIA OOM Killer。
+  - **Pipeline 規範**：強制使用 `nvh265dec` -> `glupload` -> `gles2` 渲染鏈路，減少 CPU-GPU 之間的頻繁記憶體拷貝。
+  - **容器化**：必須指定 `runtime: nvidia` 並掛載 `NVIDIA_DRIVER_CAPABILITIES=all`。
+
+# 2.4 VBS-Console (控制端)
+
+- **硬體架構**：地端管理主機 (**編譯目標: Linux/AMD64**), 主機名: `VBS-Console`。
+- **核心職責**：
+  - **遙測匯聚監控 UI**：React 狀態監看頁面，接收各節點 JSON Log並轉換為圖表或文字（Capture/Route/Engine）的實體指標：
+    - Capture端 :
+      - 硬體健康度：CPU 溫度、設備連線狀態。
+      - 影像編碼狀態：即時編碼幀率、當前運行解析度、當前瞬時編碼碼率。
+      - 多鏈路傳輸品質：雙實體網卡之個別瞬時上傳頻寬、SRTLA 協議累計掉包總數。
+    - Route端 :
+      - 雲端系統負載：AWS EC2 實例的 CPU 使用率與記憶體 (RAM) 佔用率。
+      - 串流接收品質：SRTLA 匯聚後的總接收頻寬 (Mbps) 以及封包排序錯誤率 (Packet Reordering Error Rate)。
+      - 連線追蹤狀態：VBS-Engine 渲染端的連線狀態，確認影像流是否成功被下游提取。
+    - Engine端 :
+      - GPU 硬體效能：顯示卡溫度、運算負載以及顯存佔用量
+      - 多路解碼狀態：：8 路輸入源的個別解碼幀率與即時音軌動態電平表 
+      - 輸出監控數據：最終 PGM 畫面的輸出幀率、推流連線狀態以及推流持續時間。
+  - **信令中心 (Signaling)**：處理 WHEP 握手與全域狀態指令發送。
+    - Capture端 :
+      - 動態碼率調整：即時修改編碼器的目標碼率參數，無需中斷推流。
+      - 系統維護操作：執行遠端硬體重啟。
+    - Route端 :
+      - SRT 緩衝延遲調整：動態修改雲端中繼站接收與轉發時的緩衝值（毫秒），用於在極端網路環境下平衡影像平滑度與低延遲需求。。
+    - Engine端 :
+      - 導播環境重置：遠端強制重啟 Brave (BBC) 導播核心程序，用於快速恢復渲染異常或 API 無回應之狀態。
+      - 最終推流控管：控制 PGM 畫面的啟動或停止推流，並支援在指令中動態配置目的地 SRT URL 位址。
+  - **虛擬導播按鈕 (Virtual Switcher)**：實作 PGM/PVW 切換、Cut/Fade 轉場控制。
+  - **Multiviewer (MTV) 監看**：接收來自 Engine 的 WebRTC (WHEP) 多分割畫面流。
+- **開發規範**：
+  1. **前端 (React + Tailwind CSS)**：
+    - **低延遲 MTV 播放器**：基於 WHEP 協議，強制開啟 `low-latency` 模式（禁用 Buffer），確保導播看到的分割畫面與實際 Engine 渲染同步（延遲 < 500ms）。
+    - **導播切換邏輯**：按鈕元件需模擬實體導播機（如 ATEM），區分 **Program (紅燈)** 與 **Preview (綠燈)** 狀態。
+    - **狀態預測**：當點擊切換時，前端 UI 應先進行「樂觀更新 (Optimistic UI)」，待 WebSocket 回傳確認後再鎖定狀態，提升操作手感。
+  2. **後端 (Golang - Gin/Fiber)**：
+    - **信令中繼**：僅負責交換 SDP 與轉發控制指令。**嚴禁處理/轉發任何二進位影音數據流**。
+    - **WebSocket 控制**：
+      - 各節點(Capture/Route/Engine)的傳輸資料都封成1條JSON透過WebSocket傳送，以保證所有節點的資料總傳輸不超過255
+      - 與 VBS-Engine 保持長連接。切換指令（如 `{"action": "switch", "input": 1, "target": "PGM"}`）必須在 50ms 內送達 Engine。
+    - **NTP 偏差校驗**：需定期輪詢並回報全系統節點的時鐘偏移量，確保 Log 時序一致性。
+  3. **導播控制規範 (Switcher Logic)**：
+    - **雙重安全機制**：所有切換按鈕必須具備「防連點」機制。
+    - **巨集支援**：預留 API 接口，以便未來實作Tally功能。
+  4. **自癒與穩定性**：
+    - **監看流斷線重連**：若 WebRTC 偵測到 ICE 斷開，需在 1 秒內自動發起重新交換 SDP。
+    - **狀態同步**：當 Console 頁面重新整理時，必須主動向 Engine 拉取當前 PGM/PVW 的「真實狀態」，避免 UI 顯示與實際畫面不符。
+
+---
+
+## 3. 安全架構 (Zero Trust Security)
+
+本系統建立於「零信任」基準上，所有節點間的通訊必須經過身份校驗與加密。
+
+### 1. 網路層 (Tailscale ACL & Identity)
+
+- **隔離原則**：所有內部通訊（API、遙測、控制指令）**必須**在 Tailscale VPN 內網進行。
+- **身份識別**：基於 Tailscale Tags 進行自動化權限控管：
+  - `VBS-Engine` 的 API 埠口僅接受來自 `tag:vbs-console` 的請求。
+  - `VBS-Route` 僅接受來自 `tag:vbs-capture` 的 SRTLA 封包。
+- **實作規範**：在撰寫後端代碼時，應假設防火牆（ACL）已攔截非法請求，但仍須在日誌中記錄來源請求的 Tailscale IP。 ***
+
+### 2. 媒體層 (SRT AES-256 Encryption)
+
+- **傳輸加密**：所有跨公網的 SRT / SRTLA 鏈路必須強制啟動 **AES-256** 原生加密。
+- **密鑰管理**：
+  - **嚴禁**在代碼中寫死（Hardcode）Passphrase。
+  - 必須透過環境變數 `VBS_SRT_PASSPHRASE` 注入。
+  - AI 在生成 `docker-compose.yml` 時，必須將此變數標記為外部引用。
+
+### 3. 物理與鏈路層 (SRTLA Multi-link)
+
+- **抗截獲特性**：依賴 `belabox-srtla` 將數據碎片化分送至多個行動網路鏈路。
+- **高可用性**：在實作重連邏輯時，必須確保在單一鏈路（如 eth1）斷線時，程序不會崩潰，而是持續透過其餘鏈路（如 usb0）嘗試回報狀態。
+
+### 4. 服務定位規範 (MagicDNS)
+
+- **去 IP 化**：嚴禁在代碼或設定檔中出現靜態 IP（如 `192.168.*.`* 或公網 IP）。
+- **標準主機名**：必須使用 Tailscale MagicDNS：
+  - Engine 節點定位：`http://vbs-engine:8080`
+  - Console 節點定位：`ws://vbs-console:3000`
+- **容器化注意點**：AI 生成 Docker 配置時，若需存取 MagicDNS，必須指定 `network_mode: host` 或配置正確的 DNS 轉發，確保容器內可解析 Tailscale 域名。
+
+---
+
+## 4. 數據與控制流向 (Data & Control Flows)
+
+在撰寫各節點通訊模組（如 WebSocket Server/Client, REST Proxy）時，必須嚴格遵守以下路徑與規範：
+
+### 1. 媒體流 (Data Plane) - 高頻寬、低延遲
+
+- **上行鏈路 (Uplink)**：
+  - **路徑 A**：`Capture` (SRTLA Sender) -> `Route` (SRTLA Receiver)。
+  - **路徑 B**：`Route` (SRT Caller) -> `Engine` (SRT Listener)。
+  - **安全要求**：此路徑必須強制開啟 SRT AES-256 加密，Passphrase 由環境變數 `VBS_SRT_PASSPHRASE` 管理。
+- **PGM 輸出 (Master Out)**：
+  - `Engine` (SRT Listener) -> 現場 OBS/VLC (SRT Caller)。
+- **MTV 監看 (WebRTC/WHEP)**：
+  - **路徑**：`Engine` (WHEP Endpoint) -> `Console Web 瀏覽器`。
+  - **絕對指令**：影像數據**嚴禁**經過 Console 後端代理，必須實現瀏覽器與 Engine 的直接 UDP 通訊以確保 <200ms 監看延遲。
+
+### 2. 控制流 (Control Plane) - 指令對接
+
+- **路徑**：`Console Web 瀏覽器` -> `Console 後端 (Proxy)` -> `Engine (Brave REST API)`。
+- **信令路徑 (WHEP Signaling)**：
+  - `Console Web 瀏覽器` (Offer) -> `Console 後端` -> `Engine` (Answer) -> `Console 後端` -> `瀏覽器`。
+- **開發要求**：
+  - Console 後端僅作為 HTTP POST 指令轉發與 WebRTC SDP 握手的仲介。
+  - Console 後端嚴禁緩存、解碼或處理任何媒體封包二進位數據。
+
+### 3. 遙測流 (Telemetry Plane) - 全域狀態匯聚
+
+- **狀態上報 (Node to Hub)**：
+  - **頻率**：固定 1Hz (每秒一次)。
+  - **路徑**：`所有節點 (Capture, Route, Engine)` -> `Console 後端 (WebSocket Hub)`。
+  - **標準 JSON 結構**：依各節點(Capture/Route/Engine)的需求定義
+- **狀態廣播 (Hub to Web)**：
+  - **路徑**：`Console 後端 (Hub)` -> `Console Web 瀏覽器`。
+  - **規範**：後端需實作單個 WebSocket Server，負責匯聚全系統節點數據，並以 Pub/Sub 模式分發給前端 UI 渲染。
+
+### 4. 網路基礎規範 (Networking)
+
+- **服務定位**：優先使用 **Tailscale MagicDNS 主機名**（如 `http://vbs-engine:8080`），嚴禁在代碼或配置文件中寫死動態 IP。
+- **容器網絡**：在生成 Docker Compose 時，為確保 MagicDNS 解析，應優先考慮 `network_mode: host`。
+
+---
+
+# 5. VBS 開發與部署規範
+
+為確保跨節點協作的一致性、硬體加速鏈路的完整性，所有 AI 生成的代碼、Dockerfile 及設定檔必須嚴格遵循以下規範：
+
+## 1. 標準環境變數清單 (Standard Env Vars)
+
+AI 在實作設定讀取邏輯時，必須優先尋找以下變數，嚴禁 Hardcode 敏感資訊或 IP 地址：
+
+- **核心安全與通訊**：
+  - `VBS_SRT_PASSPHRASE`: 全系統統一的 SRT AES-256 加密密鑰。
+  - `VBS_TELEMETRY_TOKEN`: WebSocket 遙測上報與 API 調用的身份驗證 Token。
+- **服務定位 (Service Discovery)**：
+  - `VBS_NODE_ID`: 當前節點唯一識別碼（如 `vbs-capture-01`, `vbs-engine`）。
+  - `VBS_CONSOLE_HOST`: Console 節點的 MagicDNS 主機名（預設：`vbs-console`）。
+  - `VBS_ENGINE_API_URL`: Engine 節點控制入口（預設：`http://vbs-engine:8080`）。
+- **運作參數**：
+  - `VBS_LOG_LEVEL`: 日誌等級（debug, info, warn, error）。
+  - `VBS_METRICS_INTERVAL`: 遙測上報頻率（預設為 `1000ms`）。
+
+## 2. Monorepo 結構與型別同步
+
+為了在 Vibe-coding 時能「感知」全域數據結構，採用以下結構：
+
+- **目錄劃分**：
+  - `/apps/`: 包含 `capture` (Go/C++), `route` (C/Go), `engine` (GStreamer/Python/Go), `console` (Go/React)。
+  - `/packages/shared/`: 存放全系統通用的 **JSON Schemas** 或 **Protobuf** 定義。
+- **指令**：
+  - **型別先行**：涉及跨節點通訊（如 WebSocket 內的 255-byte JSON）的結構，必須優先讀取 `/packages/shared` 的定義。
+  - **代碼生成**：AI 應優先產出符合 OpenAPI 3.0 或 TypeScript Interface 的定義，確保前端 React 與後端 Go 的欄位完全對齊。
+
+## 3. 容器化與硬體驅動映射 (Docker-First)
+
+在撰寫 `docker-compose.yml` 時，必須針對不同架構配置專屬硬體存取權限：
+
+- **VBS-Capture (RK3588 專屬)**：
+- **VBS-Engine (NVIDIA 專屬)**：
+
+## 4. 異步非阻塞與自癒機制 (Async & Watchdog)
+
+- **架構要求**：採用 Go Goroutines。媒體處理與控制信令必須位於**不同的線程/協程**。
+- **Watchdog 實作邏輯**：
+  - **進程守護**：父進程需監控 FFmpeg/Brave 進程。若崩潰，執行 **指數退避 (Exponential Backoff)** 重啟。
+  - **數據斷流監測**：若媒體 Pipeline 在 5 秒內未輸出有效 Buffer，強制重啟該 Pipeline 鏈路。
+- **遙測同步**：
+  - 1Hz 遙測程序必須為 **Fire-and-forget** 模式，嚴禁因 WebSocket 阻塞導致媒體推流延遲。
+  - 單條上報 JSON 必須精確控制欄位名稱，長度限制在 **255 Bytes** 內。
+
+## 5. CI/CD 與跨架構構建 (Targeting)
+
+- **多架構編譯策略**：
+  - `VBS-Capture`: 強制使用 `docker buildx` 針對 `linux/arm64` 構建，並鏈接 Rockchip 特化版 FFmpeg 庫。
+  - `Route / Engine / Console`: 針對 `linux/amd64` 構建。
+- **機敏資料**：所有密鑰（SRT Passphrase 等）僅透過 Docker Secrets 或 Runtime Env 注入，嚴禁打入 Image Layer。
+
+---
+
+## 6. 協定與通訊規範管理 (Protocol & Interface Manifest)
+
+這是為確保系統整合成功率而設定的「開發首要動作」。所有開發人員與 AI 助手在實作任何通訊邏輯前，必須先查閱並同步更新此規範。
+
+### 6.1 核心管理原則
+
+- **檔案位置**：專案根目錄下之 `protocol.md`。
+- **即時登記制**：凡確定使用的 **埠口 (Ports)**、**API 路由 (Endpoints)**、**WebSocket 消息結構 (Schemas)**、或 **SRT StreamID 命名規則**，必須第一時間寫入此文件。
+- **AI 同步義務**：AI 助手在每次生成新的 API 接口、通訊類別（Class/Struct）或修改通訊邏輯時，**必須**檢查並更新此文件，嚴禁私自定義未經登記的埠口或格式。
+
+### 6.2 規範登記內容應包含
+
+
+| 欄位                      | 說明                     | 範例                                                     |
+| ----------------------- | ---------------------- | ------------------------------------------------------ |
+| **Service Name / Port** | 服務名稱與監聽埠口              | `Engine-Control / 8080`                                |
+| **Protocol Type**       | 通訊協議類型                 | `UDP/SRT`, `TCP/WebSocket`, `HTTP/REST`                |
+| **Endpoint / Topic**    | API 路由或訂閱主題            | `/api/v1/switcher/switch` 或 `vbs/telemetry/capture-01` |
+| **Payload Definition**  | 數據封裝範例 (JSON/Protobuf) | 請求與回應的簡短 JSON 結構定義                                     |
+| **Node Context**        | 關聯節點                   | `VBS-Console` -> `VBS-Engine`                          |
+
+
+### 6.3 整合防禦機制 (Anti-Integration Hell)
+
+- **埠口衝突檢查**：新增服務前必須確認該 Port 未被其他節點服務佔用（考量到 `network_mode: host` 環境）。
+- **型別一致性**：跨節點通訊（如 Go 後端與 React 前端）之 JSON 欄位名稱必須與 `/packages/shared` 的定義一致。
+- **SRT StreamID 命名規範**：
+  - 範例：`#!::m=publish,u=user1,t=vbs-stream`
+  - 規則：必須包含 `m` (Mode), `u` (User/ID), `t` (Topic/Stream Name)。
+
+### 6.4 變更記錄 (Changelog)
+
+- 所有 API 的新增、棄用或重大格式修改，必須在此處留存簡短記錄以便 Vibe-coding 追蹤。
+
+---
+
+## 7. GitHub 協作與分支規範 (Git Workflow)
+
+為了確保開發者與 AI 助手在 Monorepo 結構中高效協作，並針對 RK3588 嵌入式環境保持穩定性，必須嚴格執行以下 Git 策略：
+
+### 7.1 分支策略 (GitHub Flow & Protection)
+* **`main` 分支**：唯一的受保護分支。必須保持隨時可部署狀態（Production Ready）。設置 Branch Protection Rule：
+    * 禁止直接 Push。
+    * 必須通過 CI 測試且獲得至少一名開發者審核 (Review) 始可合併。
+* **功能分支 (`feature/` 或 `fix/`)**：格式為 `feature/<模組名>-<簡短描述>`（例如：`feature/vbs-capture-rk-mpp`）。
+    * 所有新功能、Bug 修復或 AI 實驗必須在獨立分支進行。
+    * 分支命名必須包含對應的 Package 名稱，便於過濾 CI 任務。
+
+### 7.2 Pull Request (PR) 規範與 AI 輔助
+* **AI 生成摘要**：所有 PR 必須包含由 AI 或開發者撰寫的 `Detailed Changelog`。
+    * **變更範圍**：明確標註受影響的模組（如 `vbs-engine`）。
+    * **硬體影響**：若涉及 RK3588 MPP/RGA 驅動調用或核心參數修改，必須加粗標註。
+    * **破壞性變更 (Breaking Changes)**：若修改了 `/packages/shared` 中的 Protobuf 或 API 定義，必須說明兼容性處理方案。
+* **衝突解決原則**：發生 Monorepo 衝突時，優先遵循 `/packages/shared` 的協議定義，業務邏輯必須向協議看齊。
+
+### 7.3 語義化版本與標籤 (Versioning)
+* **版本格式**：採用 `vMajor.Minor.Patch`（如 `v1.2.0`）。
+    * `Major`: 協議不相容的大更動。
+    * `Minor`: 新增功能但向下相容。
+    * `Patch`: Bug 修復。
+* **自動化標籤 (Auto-Tagging)**：合併至 `main` 後，應由 GitHub Actions 根據 Commit 訊息（如含有 `feat:` 或 `fix:`）自動建議或生成下一個版本號。
+
+### 7.4 CI/CD 觸發邏輯 (Turbo-optimized)
+利用 Monorepo 的特性，僅針對「有變更的模組」執行任務：
+* **Push to Feature Branch**：
+    * 執行 `Lint` 與 `Unit Test`。
+    * **只針對受影響的 Package** 進行編譯測試（利用 `turbo run build --filter...`）。
+* **Merge to Main**：
+    * 自動構建並推送標記為 `:latest` 的 Docker 鏡像至 GHCR.io。
+    * 同步更新開發環境的部署狀態。
+* **Tag Create (`v*`)**：
+    * 正式 Release 流程：自動構建生產環境鏡像並標記版本號（如 `:1.2.0`）。
+    * 自動產生 GitHub Release Note。
+
+### 7.5 Commit Message 格式 (Conventional Commits)
+強制執行以下格式，以利 AI 檢索與自動生成變更日誌：
+* `feat(capture): 實作 RK3588 硬體編碼重連機制`
+* `fix(engine): 修復 WebRTC 監看流在特定瀏覽器黑屏問題`
+* `refactor(shared): 更新 API 協議以支援多路音軌控制`
+* `perf(console): 優化大數據量下的圖表渲染效能`
+* `chore(deps): 升級第三方依賴以修復安全漏洞`
+
+---
+
+## 8. 版本發布與說明規範 (Release & Documentation Rules)
+
+為了維持專案文件的可讀性、維護性與 AI 檢索的一致性，所有開發成員與 AI 助手在產生說明文件、日誌與通訊時，必須嚴格遵守以下規範：
+
+### 8.1 強制語言規範 (Language Standard)
+* **繁體中文唯一制**：
+    * 所有的 **代碼修改說明 (Code Comments/Docs)**、**除錯日誌 (Debug Logs)** 以及 **Git Commit Message**，一律使用**繁體中文**撰寫。
+    * `main` 分支的所有 **正式發布版 (Official Release) 說明** 與 GitHub Release 頁面，必須使用**繁體中文**。
+* **術語保留**：專有名詞、API 關鍵字、硬體寄存器名稱（如 RK3588 MPP, WebRTC, RGA）可保留英文原名。
+
+### 8.2 發布日誌 (Release Notes) 撰寫邏輯
+為了確保任何人（或 AI）讀取最新版本說明時，能立即掌握系統全貌，採取以下策略：
+
+* **現狀覆蓋制 (Current State Coverage)**：
+    * 正式發布版的說明不再僅僅是「本次更新了什麼」，而是必須完整、精確地列出「**系統目前具備的所有功能與狀態**」。
+    * 說明書應包含：當前支援的硬體編解碼能力、API 協議版本、現有的模組清單（VBS-Capture/Route/Engine/Console）及其對應功能。
+* **全面替換原則 (Full Replacement)**：
+    * 每次進行版本更新時，必須將舊版的 Release 說明**全面替換**為最新版本的完整功能描述。
+    * **禁止堆疊式更新**：不應出現「v1.1 更新了 A」、「v1.2 更新了 B」這種瑣碎的歷史堆疊。
+* **歷史追溯機制**：
+    * 若需查閱過往版本的功能更動細節，開發者應導引至 Git Commit 歷史紀錄或查看對應的 Git Tag 說明。
+    * **當前主文件（如 README.md 或最新 Release 頁面）僅保留最新的系統現狀**，確保資訊的單一真相 (Single Source of Truth)。
+
+### 8.3 文件結構範本 (Suggested Structure)
+每次發布時，說明文件應包含以下固定區塊：
+1. **版本號與硬體基準**：(例如：v1.2.0 | RK3588 SDK v1.5)
+2. **核心功能現狀**：(當前系統完整支援的功能清單)
+3. **API 與協議狀態**：(目前對外開放的接口與數據格式)
+4. **已知限制與未竟事宜**：(目前尚未支援或已知待修復的問題)
+
+---
+
+EOF

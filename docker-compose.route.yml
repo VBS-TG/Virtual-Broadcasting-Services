@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  vbs-route:
+    build:
+      context: .
+      dockerfile: apps/route/Dockerfile
+    network_mode: host
+    environment:
+      - VBS_NODE_ID=vbs-route-01
+      - VBS_LOG_LEVEL=info
+      - VBS_METRICS_INTERVAL=1000ms
+      - VBS_SRT_PASSPHRASE
+      - VBS_ROUTE_SRTLA_INGEST_PORT=10020
+      - VBS_ROUTE_SRT_OUTPUT_PORT=10030
+    # volumes:
+    #   - ./logs/route:/var/log/vbs-route
+
