@@ -40,7 +40,6 @@ COPY --from=builder /usr/local/bin/srt-live-transmit /usr/local/bin/srt-live-tra
 
 # 部分 SRT 相關動態庫需要從 builder 補上。
 COPY --from=builder /usr/local/lib /usr/local/lib
-COPY --from=builder /usr/local/lib64 /usr/local/lib64
 
 # srt/srtla 二進位通常依賴 OpenSSL runtime；確保 bullseye-slim 內有對應 library。
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl1.1 || true && rm -rf /var/lib/apt/lists/*
