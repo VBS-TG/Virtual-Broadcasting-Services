@@ -16,6 +16,15 @@ type Config struct {
 
 	SRTLAIngestPort int
 	SRTOutputPort   int
+
+	// 用於 srt-live-transmit 的基本 jitter buffer 參數（MVP 靜態設定，後續可改為 Console 動態控制）。
+	// 對照 BELABOX/srtla README：lossmaxttl 為接收視窗大小；latency 為可用的重傳/重排序時間（ms）。
+	LossMaxTTL int
+	LatencyMs  int
+
+	// srtla_rec 送入 srt-live-transmit 的「內部」SRT listener port。
+	// MVP 預設為 SRTLAIngestPort + 1，避免與既定輸出埠衝突。
+	InternalSRTPort int
 }
 
 // env 變數名稱常數。
@@ -27,6 +36,10 @@ const (
 
 	envSRTLAIngestPort = "VBS_ROUTE_SRTLA_INGEST_PORT"
 	envSRTOutputPort   = "VBS_ROUTE_SRT_OUTPUT_PORT"
+
+	envLossMaxTTL      = "VBS_ROUTE_LOSS_MAX_TTL"
+	envLatencyMs       = "VBS_ROUTE_SRT_LATENCY_MS"
+	envInternalSRTPort = "VBS_ROUTE_INTERNAL_SRT_PORT"
 )
 
 // Load 讀取環境變數，並給予安全的預設值。
@@ -48,6 +61,12 @@ func Load() Config {
 	// 預設埠號僅供開發與測試，實際部署時應由 protocol.md 規範並由外部注入。
 	cfg.SRTLAIngestPort = getenvIntOrDefault(envSRTLAIngestPort, 10020)
 	cfg.SRTOutputPort = getenvIntOrDefault(envSRTOutputPort, 10030)
+
+	cfg.LossMaxTTL = getenvIntOrDefault(envLossMaxTTL, 40)
+	cfg.LatencyMs = getenvIntOrDefault(envLatencyMs, 2000)
+
+	defaultInternal := cfg.SRTLAIngestPort + 1
+	cfg.InternalSRTPort = getenvIntOrDefault(envInternalSRTPort, defaultInternal)
 
 	return cfg
 }

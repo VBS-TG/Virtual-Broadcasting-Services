@@ -19,6 +19,9 @@ func Run(ctx context.Context, cfg config.Config) {
 		SRTPassphrase:   cfg.SRTPassphrase,
 		SRTLAIngestPort: cfg.SRTLAIngestPort,
 		SRTOutputPort:   cfg.SRTOutputPort,
+		InternalSRTPort:  cfg.InternalSRTPort,
+		LossMaxTTL:       cfg.LossMaxTTL,
+		LatencyMs:        cfg.LatencyMs,
 	}, logger)
 
 	go pipeline.Run(ctx)
