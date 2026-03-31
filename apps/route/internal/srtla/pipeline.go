@@ -1,8 +1,10 @@
 package srtla
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os/exec"
 	"strconv"
@@ -54,13 +56,15 @@ func (p *Pipeline) Run(ctx context.Context) {
 		}
 
 		p.logger.Printf(
-			"[route][srtla] starting pipeline node_id=%s ingest_port=%d internal_srt_port=%d srt_out_port=%d lossmaxttl=%d latency_ms=%d",
-			p.cfg.NodeID, p.cfg.SRTLAIngestPort, p.cfg.InternalSRTPort, p.cfg.SRTOutputPort, p.cfg.LossMaxTTL, p.cfg.LatencyMs,
+			"[route][srtla] starting pipeline node_id=%s ingest_port=%d internal_srt_port=%d srt_out_port=%d lossmaxttl=%d latency_ms=%d output_encryption=%t",
+			p.cfg.NodeID, p.cfg.SRTLAIngestPort, p.cfg.InternalSRTPort, p.cfg.SRTOutputPort, p.cfg.LossMaxTTL, p.cfg.LatencyMs, p.cfg.SRTPassphrase != "",
 		)
 
 		// MVP：srt-live-transmit 先建立內部 SRT listener，再由 srtla_rec 將 SRTLA 輸入轉送到內部 SRT。
 		ltCmd := p.buildSrtLiveTransmitCommand(ctx)
 		recCmd := p.buildSrtlaRecCommand(ctx)
+		p.attachCommandLogs("srt-live-transmit", ltCmd)
+		p.attachCommandLogs("srtla_rec", recCmd)
 
 		ltStarted := false
 		recStarted := false
@@ -151,13 +155,19 @@ func (p *Pipeline) buildSrtLiveTransmitCommand(ctx context.Context) *exec.Cmd {
 
 	// output listener：套用 AES-256 passphrase（對應 .cursorrules 要求）
 	outURL := fmt.Sprintf(
-		"srt://0.0.0.0:%d?mode=listener&passphrase=%s&pbkeylen=32&latency=%d",
+		"srt://0.0.0.0:%d?mode=listener&latency=%d",
 		p.cfg.SRTOutputPort,
-		// 注意：避免對 passphrase 再做額外 URL encoding，避免造成 receiver/listener 端解密密鑰不一致。
-		// .cursorrules 規定 passphrase 需一致性，因此這裡直接使用原始字串。
-		p.cfg.SRTPassphrase,
 		p.cfg.LatencyMs,
 	)
+	if p.cfg.SRTPassphrase != "" {
+		// 僅在有設定 passphrase 時啟用加密相關參數，避免空值造成握手異常。
+		outURL = fmt.Sprintf(
+			"srt://0.0.0.0:%d?mode=listener&latency=%d&passphrase=%s&pbkeylen=32&enforcedencryption=1",
+			p.cfg.SRTOutputPort,
+			p.cfg.LatencyMs,
+			p.cfg.SRTPassphrase,
+		)
+	}
 
 	// -st:yes 表示使用順序時間戳校正（保持與官方示例一致）
 	return exec.CommandContext(ctx, "srt-live-transmit", "-st:yes", inURL, outURL)
@@ -174,5 +184,31 @@ func (p *Pipeline) buildSrtlaRecCommand(ctx context.Context) *exec.Cmd {
 		intToString(p.cfg.InternalSRTPort),
 	}
 	return exec.CommandContext(ctx, "srtla_rec", args...)
+}
+
+func (p *Pipeline) attachCommandLogs(name string, cmd *exec.Cmd) {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		p.logger.Printf("[route][srtla] failed to attach stdout for %s err=%v", name, err)
+		return
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		p.logger.Printf("[route][srtla] failed to attach stderr for %s err=%v", name, err)
+		return
+	}
+
+	go p.streamLogs(name, "stdout", stdout)
+	go p.streamLogs(name, "stderr", stderr)
+}
+
+func (p *Pipeline) streamLogs(procName, stream string, r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		p.logger.Printf("[route][srtla][%s][%s] %s", procName, stream, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		p.logger.Printf("[route][srtla][%s][%s] read error err=%v", procName, stream, err)
+	}
 }
 

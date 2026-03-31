@@ -25,6 +25,9 @@ type Config struct {
 	// srtla_rec 送入 srt-live-transmit 的「內部」SRT listener port。
 	// MVP 預設為 SRTLAIngestPort + 1，避免與既定輸出埠衝突。
 	InternalSRTPort int
+
+	// 估算 ingest Mbps 使用的網卡名稱（通常在 Tailscale 環境為 tailscale0）。
+	IngestIface string
 }
 
 // env 變數名稱常數。
@@ -40,6 +43,7 @@ const (
 	envLossMaxTTL      = "VBS_ROUTE_LOSS_MAX_TTL"
 	envLatencyMs       = "VBS_ROUTE_SRT_LATENCY_MS"
 	envInternalSRTPort = "VBS_ROUTE_INTERNAL_SRT_PORT"
+	envIngestIface     = "VBS_ROUTE_INGEST_IFACE"
 )
 
 // Load 讀取環境變數，並給予安全的預設值。
@@ -67,6 +71,7 @@ func Load() Config {
 
 	defaultInternal := cfg.SRTLAIngestPort + 1
 	cfg.InternalSRTPort = getenvIntOrDefault(envInternalSRTPort, defaultInternal)
+	cfg.IngestIface = getenvOrDefault(envIngestIface, "tailscale0")
 
 	return cfg
 }
