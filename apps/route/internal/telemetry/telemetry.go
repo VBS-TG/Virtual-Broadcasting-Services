@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"vbs/apps/route/internal/config"
+	"vbs/apps/route/internal/srtla"
 )
 
 // Metrics 描述 Route 節點在 .cursorrules 中要求的核心遙測欄位。
@@ -32,7 +33,7 @@ type Metrics struct {
 
 // StartLocalLogger 會依照設定的 MetricsInterval 週期性輸出單行 JSON，
 // 後續可將同一份資料改為送往 Console WebSocket Hub。
-func StartLocalLogger(ctx context.Context, cfg config.Config, logger *log.Logger) {
+func StartLocalLogger(ctx context.Context, cfg config.Config, logger *log.Logger, pipeline *srtla.Pipeline) {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -47,7 +48,8 @@ func StartLocalLogger(ctx context.Context, cfg config.Config, logger *log.Logger
 			return
 		case <-ticker.C:
 			ingestMbps := collector.sampleMbps()
-			m := collectMetrics(cfg, ingestMbps)
+			s := pipeline.Snapshot()
+			m := collectMetrics(cfg, ingestMbps, s)
 			buf, err := json.Marshal(m)
 			if err != nil {
 				logger.Printf("[route][telemetry] marshal error err=%v", err)
@@ -65,9 +67,19 @@ func StartLocalLogger(ctx context.Context, cfg config.Config, logger *log.Logger
 	}
 }
 
-func collectMetrics(cfg config.Config, ingestMbps float64) Metrics {
+func collectMetrics(cfg config.Config, ingestMbps float64, s srtla.Stats) Metrics {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
+
+	reorderErrPct := 0.0
+	if s.BytesSent > 0 {
+		reorderErrPct = round2(float64(s.BytesLost) * 100.0 / float64(s.BytesSent))
+	}
+
+	hasEngineClient := false
+	if s.LastUpdate.After(time.Now().Add(-5 * time.Second)) && s.BytesSent > 0 {
+		hasEngineClient = true
+	}
 
 	return Metrics{
 		NodeID: cfg.NodeID,
@@ -75,8 +87,8 @@ func collectMetrics(cfg config.Config, ingestMbps float64) Metrics {
 		CPUPercent: 0,           // MVP 階段暫不精準計算 CPU，比率保留欄位
 		MemBytes:   ms.Alloc,    // 使用 Go runtime 目前配置的記憶體數量
 		TotalIngestMbps: ingestMbps,
-		ReorderErrorPct: 0,      // 同上
-		HasEngineClient: false,  // 未整合實際連線追蹤前，先以 false 佔位
+		ReorderErrorPct: reorderErrPct,
+		HasEngineClient: hasEngineClient,
 	}
 }
 

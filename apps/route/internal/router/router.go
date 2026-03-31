@@ -25,7 +25,7 @@ func Run(ctx context.Context, cfg config.Config) {
 	}, logger)
 
 	go pipeline.Run(ctx)
-	go telemetry.StartLocalLogger(ctx, cfg, logger)
+	go telemetry.StartLocalLogger(ctx, cfg, logger, pipeline)
 
 	// 後續可在此擴充：例如多條 pipeline、健康檢查、對 Console WebSocket Hub 的遙測上報等。
 	<-ctx.Done()

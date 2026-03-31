@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -74,6 +75,17 @@ func Load() Config {
 	cfg.IngestIface = getenvOrDefault(envIngestIface, "tailscale0")
 
 	return cfg
+}
+
+// Validate 驗證 Route 啟動必要條件。
+func (c Config) Validate() error {
+	if c.SRTPassphrase == "" {
+		return fmt.Errorf("VBS_SRT_PASSPHRASE is required")
+	}
+	if c.SRTLAIngestPort <= 0 || c.SRTOutputPort <= 0 || c.InternalSRTPort <= 0 {
+		return fmt.Errorf("route ports must be positive")
+	}
+	return nil
 }
 
 func getenvOrDefault(key, def string) string {

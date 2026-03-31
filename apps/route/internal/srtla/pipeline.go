@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +31,16 @@ type PipelineConfig struct {
 type Pipeline struct {
 	cfg    PipelineConfig
 	logger *log.Logger
+	mu     sync.RWMutex
+	stats  Stats
+}
+
+// Stats 為 Route pipeline 的即時狀態摘要，提供 telemetry 使用。
+type Stats struct {
+	BytesLost     uint64
+	BytesSent     uint64
+	BytesReceived uint64
+	LastUpdate    time.Time
 }
 
 func NewPipeline(cfg PipelineConfig, logger *log.Logger) *Pipeline {
@@ -39,6 +51,12 @@ func NewPipeline(cfg PipelineConfig, logger *log.Logger) *Pipeline {
 		cfg:    cfg,
 		logger: logger,
 	}
+}
+
+func (p *Pipeline) Snapshot() Stats {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.stats
 }
 
 // Run 會在未取消前持續確保外部 SRTLA → SRT 流程存在。
@@ -205,10 +223,44 @@ func (p *Pipeline) attachCommandLogs(name string, cmd *exec.Cmd) {
 func (p *Pipeline) streamLogs(procName, stream string, r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		p.logger.Printf("[route][srtla][%s][%s] %s", procName, stream, scanner.Text())
+		line := sanitizeSensitive(scanner.Text())
+		p.logger.Printf("[route][srtla][%s][%s] %s", procName, stream, line)
+		if procName == "srt-live-transmit" {
+			p.tryParseSrtStats(line)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		p.logger.Printf("[route][srtla][%s][%s] read error err=%v", procName, stream, err)
 	}
+}
+
+var passphrasePattern = regexp.MustCompile(`(?i)(passphrase=)[^&\s]+`)
+
+func sanitizeSensitive(s string) string {
+	// 避免在 log 中暴露敏感資訊。
+	return passphrasePattern.ReplaceAllString(s, "${1}***")
+}
+
+var srtStatsPattern = regexp.MustCompile(`(?i)(\d+)\s+bytes\s+lost,\s+(\d+)\s+bytes\s+sent,\s+(\d+)\s+bytes\s+received`)
+
+func (p *Pipeline) tryParseSrtStats(line string) {
+	m := srtStatsPattern.FindStringSubmatch(strings.ToLower(line))
+	if len(m) != 4 {
+		return
+	}
+	lost, err1 := strconv.ParseUint(m[1], 10, 64)
+	sent, err2 := strconv.ParseUint(m[2], 10, 64)
+	recv, err3 := strconv.ParseUint(m[3], 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return
+	}
+	p.mu.Lock()
+	p.stats = Stats{
+		BytesLost:     lost,
+		BytesSent:     sent,
+		BytesReceived: recv,
+		LastUpdate:    time.Now(),
+	}
+	p.mu.Unlock()
 }
 

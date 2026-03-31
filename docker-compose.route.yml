@@ -11,6 +11,9 @@ services:
       - VBS_SRT_PASSPHRASE
       - VBS_ROUTE_SRTLA_INGEST_PORT=10020
       - VBS_ROUTE_SRT_OUTPUT_PORT=10030
+      - VBS_ROUTE_INTERNAL_SRT_PORT=10021
+      - VBS_ROUTE_LOSS_MAX_TTL=40
+      - VBS_ROUTE_SRT_LATENCY_MS=2000
       - VBS_ROUTE_INGEST_IFACE=tailscale0
     # volumes:
     #   - ./logs/route:/var/log/vbs-route

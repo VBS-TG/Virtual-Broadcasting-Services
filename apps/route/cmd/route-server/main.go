@@ -16,12 +16,34 @@ import (
 func main() {
 	// 初始化設定
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("[route] invalid config err=%v", err)
+	}
 
 	log.Printf("[route] start node_id=%s log_level=%s metrics_interval=%s ingest_port=%d srt_out_port=%d",
 		cfg.NodeID, cfg.LogLevel, cfg.MetricsInterval, cfg.SRTLAIngestPort, cfg.SRTOutputPort)
 
 	// 套用 Route 節點需求的基礎網路緩衝調整（若失敗僅記錄警告，不中斷啟動）。
 	system.ApplyNetTuning(nil)
+
+	// 啟動前先檢查主要 UDP 埠是否可用，避免進入 watchdog 重啟循環才發現被占用。
+	for _, p := range []int{cfg.SRTLAIngestPort, cfg.InternalSRTPort, cfg.SRTOutputPort} {
+		if err := system.CheckUDPPortAvailable(p); err != nil {
+			log.Fatalf("[route] port preflight failed port=%d err=%v", p, err)
+		}
+		log.Printf("[route] port preflight ok port=%d", p)
+	}
+
+	log.Printf(
+		"[route] route config summary ingest_iface=%s encryption=%s",
+		cfg.IngestIface,
+		func() string {
+			if cfg.SRTPassphrase != "" {
+				return "enabled"
+			}
+			return "disabled"
+		}(),
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
