@@ -14,28 +14,27 @@ import (
 	"time"
 )
 
-// PipelineConfig 描述 SRTLA Receiver 與 SRT Listener 之間的基本連線參數。
+// PipelineConfig 描述單次 SRTLA → SRT 管線快照（可熱更新）。
 type PipelineConfig struct {
 	NodeID        string
 	SRTPassphrase string
 
 	SRTLAIngestPort int
 	SRTOutputPort   int
-
 	InternalSRTPort int
 	LossMaxTTL      int
 	LatencyMs       int
 }
 
-// Pipeline 負責管理對應的外部進程，並提供基本的 watchdog 與指數退避重啟邏輯。
+// Pipeline 管理外部進程與 watchdog（子進程結束、外部重啟信號皆會觸發整條管線重建）。
 type Pipeline struct {
-	cfg    PipelineConfig
-	logger *log.Logger
-	mu     sync.RWMutex
-	stats  Stats
+	getConfig func() PipelineConfig
+	logger    *log.Logger
+	mu        sync.RWMutex
+	stats     Stats
 }
 
-// Stats 為 Route pipeline 的即時狀態摘要，提供 telemetry 使用。
+// Stats 為 Route pipeline 的即時狀態摘要，供遙測使用。
 type Stats struct {
 	BytesLost     uint64
 	BytesSent     uint64
@@ -43,13 +42,14 @@ type Stats struct {
 	LastUpdate    time.Time
 }
 
-func NewPipeline(cfg PipelineConfig, logger *log.Logger) *Pipeline {
+// NewPipeline 建立管線；getConfig 每次啟動子進程前呼叫，以套用熱更新參數。
+func NewPipeline(getConfig func() PipelineConfig, logger *log.Logger) *Pipeline {
 	if logger == nil {
 		logger = log.Default()
 	}
 	return &Pipeline{
-		cfg:    cfg,
-		logger: logger,
+		getConfig: getConfig,
+		logger:    logger,
 	}
 }
 
@@ -59,28 +59,28 @@ func (p *Pipeline) Snapshot() Stats {
 	return p.stats
 }
 
-// Run 會在未取消前持續確保外部 SRTLA → SRT 流程存在。
-// 若子進程異常結束，會採用指數退避方式重啟。
-func (p *Pipeline) Run(ctx context.Context) {
+// Run 持續維持 SRTLA → SRT 流程。externalRestart 非 nil 時，收到信號會強制重啟管線（停滯自癒或控制面更新）。
+func (p *Pipeline) Run(ctx context.Context, externalRestart <-chan struct{}) {
 	backoff := time.Second
-	maxBackoff := 30 * time.Second
+	const maxBackoff = 30 * time.Second
 
 	for {
 		select {
 		case <-ctx.Done():
-			p.logger.Printf("[route][srtla] context canceled, stop pipeline")
+			p.logger.Printf("[route][srtla] context canceled，停止管線")
 			return
 		default:
 		}
 
+		cfg := p.getConfig()
 		p.logger.Printf(
-			"[route][srtla] starting pipeline node_id=%s ingest_port=%d internal_srt_port=%d srt_out_port=%d lossmaxttl=%d latency_ms=%d output_encryption=%t",
-			p.cfg.NodeID, p.cfg.SRTLAIngestPort, p.cfg.InternalSRTPort, p.cfg.SRTOutputPort, p.cfg.LossMaxTTL, p.cfg.LatencyMs, p.cfg.SRTPassphrase != "",
+			"[route][srtla] 啟動管線 node_id=%s ingest_port=%d internal_srt_port=%d srt_out_port=%d lossmaxttl=%d latency_ms=%d output_encryption=%t",
+			cfg.NodeID, cfg.SRTLAIngestPort, cfg.InternalSRTPort, cfg.SRTOutputPort, cfg.LossMaxTTL, cfg.LatencyMs, cfg.SRTPassphrase != "",
 		)
 
-		// MVP：srt-live-transmit 先建立內部 SRT listener，再由 srtla_rec 將 SRTLA 輸入轉送到內部 SRT。
-		ltCmd := p.buildSrtLiveTransmitCommand(ctx)
-		recCmd := p.buildSrtlaRecCommand(ctx)
+		innerCtx, cancel := context.WithCancel(ctx)
+		ltCmd := p.buildSrtLiveTransmitCommand(innerCtx, cfg)
+		recCmd := p.buildSrtlaRecCommand(innerCtx, cfg)
 		p.attachCommandLogs("srt-live-transmit", ltCmd)
 		p.attachCommandLogs("srtla_rec", recCmd)
 
@@ -88,26 +88,24 @@ func (p *Pipeline) Run(ctx context.Context) {
 		recStarted := false
 
 		if err := ltCmd.Start(); err != nil {
-			p.logger.Printf("[route][srtla] failed to start srt-live-transmit err=%v", err)
+			p.logger.Printf("[route][srtla] 無法啟動 srt-live-transmit err=%v", err)
 		} else {
 			ltStarted = true
-			p.logger.Printf("[route][srtla] started srt-live-transmit pid=%d", ltCmd.Process.Pid)
+			p.logger.Printf("[route][srtla] 已啟動 srt-live-transmit pid=%d", ltCmd.Process.Pid)
 		}
 
-		// 給內部 listener 一點時間讓其準備就緒。
 		time.Sleep(500 * time.Millisecond)
 
 		if err := recCmd.Start(); err != nil {
-			p.logger.Printf("[route][srtla] failed to start srtla_rec err=%v", err)
+			p.logger.Printf("[route][srtla] 無法啟動 srtla_rec err=%v", err)
 		} else {
 			recStarted = true
-			p.logger.Printf("[route][srtla] started srtla_rec pid=%d", recCmd.Process.Pid)
+			p.logger.Printf("[route][srtla] 已啟動 srtla_rec pid=%d", recCmd.Process.Pid)
 		}
 
 		errCh := make(chan error, 2)
 		var wg sync.WaitGroup
 		wg.Add(2)
-
 		go func() {
 			defer wg.Done()
 			errCh <- ltCmd.Wait()
@@ -117,32 +115,40 @@ func (p *Pipeline) Run(ctx context.Context) {
 			errCh <- recCmd.Wait()
 		}()
 
-		var runErr error
+		reason := "child_exit"
 		select {
 		case <-ctx.Done():
-			p.logger.Printf("[route][srtla] context canceled, stopping child processes")
-		case runErr = <-errCh:
-			p.logger.Printf("[route][srtla] child process exited err=%v, restarting whole pipeline", runErr)
+			reason = "shutdown"
+		case <-externalRestart:
+			reason = "external_restart"
+			p.logger.Printf("[route][srtla] 收到外部重啟信號，將重建管線")
+		case err := <-errCh:
+			p.logger.Printf("[route][srtla] 子進程結束 err=%v，將重建管線", err)
 		}
 
-		// 任一子進程結束即重啟整條 pipeline。
 		if recStarted && recCmd.Process != nil {
 			_ = recCmd.Process.Kill()
 		}
 		if ltStarted && ltCmd.Process != nil {
 			_ = ltCmd.Process.Kill()
 		}
-
-		// 等待 Wait goroutines 結束，避免資源殘留。
+		cancel()
 		wg.Wait()
 
-		p.logger.Printf("[route][srtla] restarting after backoff=%s", backoff)
+		if reason == "shutdown" {
+			return
+		}
+
+		if reason == "external_restart" {
+			backoff = time.Second
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(backoff):
 		}
-
 		backoff *= 2
 		if backoff > maxBackoff {
 			backoff = maxBackoff
@@ -154,52 +160,37 @@ func intToString(v int) string {
 	return strconv.Itoa(v)
 }
 
-func (p *Pipeline) buildSrtLiveTransmitCommand(ctx context.Context) *exec.Cmd {
-	// 依照 BELABOX/srtla README 的建議：
-	// - srt-live-transmit 使用 internal listener 端口接收 srtla_rec 的輸出
-	// - 再把穩定流提供給 Engine 的 srt://0.0.0.0:<SRT_OUTPUT_PORT>?mode=listener
-	//
-	// 備註：
-	// README 明示其基本設定不含 encryption/auth；因此 MVP 先把加密套用在「對 Engine 的輸出端」。
-	// 你若後續確認 srtla_rec 也能協同 SRT encryption，可再擴充到輸入端。
-
-	// internal input：不帶 passphrase（MVP 對照其 README 預設行為）
+func (p *Pipeline) buildSrtLiveTransmitCommand(ctx context.Context, cfg PipelineConfig) *exec.Cmd {
+	// 內部迴路：本機 127.0.0.1，不經公網；對 Engine 的 listener 強制 AES-256（passphrase 由環境注入）。
 	inURL := fmt.Sprintf(
 		"srt://127.0.0.1:%d?mode=listener&lossmaxttl=%d&latency=%d",
-		p.cfg.InternalSRTPort,
-		p.cfg.LossMaxTTL,
-		p.cfg.LatencyMs,
+		cfg.InternalSRTPort,
+		cfg.LossMaxTTL,
+		cfg.LatencyMs,
 	)
 
-	// output listener：套用 AES-256 passphrase（對應 .cursorrules 要求）
 	outURL := fmt.Sprintf(
 		"srt://0.0.0.0:%d?mode=listener&latency=%d",
-		p.cfg.SRTOutputPort,
-		p.cfg.LatencyMs,
+		cfg.SRTOutputPort,
+		cfg.LatencyMs,
 	)
-	if p.cfg.SRTPassphrase != "" {
-		// 僅在有設定 passphrase 時啟用加密相關參數，避免空值造成握手異常。
+	if cfg.SRTPassphrase != "" {
 		outURL = fmt.Sprintf(
 			"srt://0.0.0.0:%d?mode=listener&latency=%d&passphrase=%s&pbkeylen=32&enforcedencryption=1",
-			p.cfg.SRTOutputPort,
-			p.cfg.LatencyMs,
-			p.cfg.SRTPassphrase,
+			cfg.SRTOutputPort,
+			cfg.LatencyMs,
+			cfg.SRTPassphrase,
 		)
 	}
 
-	// -st:yes 表示使用順序時間戳校正（保持與官方示例一致）
 	return exec.CommandContext(ctx, "srt-live-transmit", "-st:yes", inURL, outURL)
 }
 
-func (p *Pipeline) buildSrtlaRecCommand(ctx context.Context) *exec.Cmd {
-	// 依照 BELABOX/srtla README：
-	// path/to/srtla/srtla_rec <srtla_listen_port> <receiver_srt_ip> <receiver_srt_output_port>
-	//
-	// 其中 <receiver_srt_output_port> 對應 internal listener 給 srt-live-transmit 消費。
+func (p *Pipeline) buildSrtlaRecCommand(ctx context.Context, cfg PipelineConfig) *exec.Cmd {
 	args := []string{
-		intToString(p.cfg.SRTLAIngestPort),
+		intToString(cfg.SRTLAIngestPort),
 		"127.0.0.1",
-		intToString(p.cfg.InternalSRTPort),
+		intToString(cfg.InternalSRTPort),
 	}
 	return exec.CommandContext(ctx, "srtla_rec", args...)
 }
@@ -207,12 +198,12 @@ func (p *Pipeline) buildSrtlaRecCommand(ctx context.Context) *exec.Cmd {
 func (p *Pipeline) attachCommandLogs(name string, cmd *exec.Cmd) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		p.logger.Printf("[route][srtla] failed to attach stdout for %s err=%v", name, err)
+		p.logger.Printf("[route][srtla] 無法綁定 stdout（%s） err=%v", name, err)
 		return
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		p.logger.Printf("[route][srtla] failed to attach stderr for %s err=%v", name, err)
+		p.logger.Printf("[route][srtla] 無法綁定 stderr（%s） err=%v", name, err)
 		return
 	}
 
@@ -230,14 +221,13 @@ func (p *Pipeline) streamLogs(procName, stream string, r io.Reader) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		p.logger.Printf("[route][srtla][%s][%s] read error err=%v", procName, stream, err)
+		p.logger.Printf("[route][srtla][%s][%s] 讀取錯誤 err=%v", procName, stream, err)
 	}
 }
 
 var passphrasePattern = regexp.MustCompile(`(?i)(passphrase=)[^&\s]+`)
 
 func sanitizeSensitive(s string) string {
-	// 避免在 log 中暴露敏感資訊。
 	return passphrasePattern.ReplaceAllString(s, "${1}***")
 }
 
@@ -263,4 +253,3 @@ func (p *Pipeline) tryParseSrtStats(line string) {
 	}
 	p.mu.Unlock()
 }
-

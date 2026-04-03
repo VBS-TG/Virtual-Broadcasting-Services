@@ -13,7 +13,7 @@ RUN go build -o /out/route-server ./apps/route/cmd/route-server
 # - srtla_rec：接收 SRTLA（BELABOX/srtla）
 # - srt-live-transmit：把 internal listener 轉成對 Engine 的 SRT listener（同 BELABOX/srtla README）
 #
-# MVP：以從原始碼 build 的方式確保容器內就有二進位，避免你在 EC2 上額外手動安裝。
+# 從原始碼建置 srtla / SRT 工具，避免執行環境缺少二進位。
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git build-essential pkg-config cmake tclsh autoconf automake libtool libssl-dev \
   && rm -rf /var/lib/apt/lists/*
@@ -42,11 +42,11 @@ COPY --from=builder /usr/local/bin/srt-live-transmit /usr/local/bin/srt-live-tra
 COPY --from=builder /usr/local/lib /usr/local/lib
 
 # srt/srtla 二進位通常依賴 OpenSSL runtime；確保 bullseye-slim 內有對應 library。
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl1.1 || true && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl1.1 iproute2 || true && rm -rf /var/lib/apt/lists/*
 
 ENV VBS_LOG_LEVEL=info
 
-# MVP：使用 PATH 直接呼叫二進位
+# 以 PATH 直接呼叫 srtla_rec、srt-live-transmit
 ENV PATH="/usr/local/bin:${PATH}"
 
 CMD ["route-server"]

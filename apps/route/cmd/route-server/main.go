@@ -20,8 +20,8 @@ func main() {
 		log.Fatalf("[route] invalid config err=%v", err)
 	}
 
-	log.Printf("[route] start node_id=%s log_level=%s metrics_interval=%s ingest_port=%d srt_out_port=%d",
-		cfg.NodeID, cfg.LogLevel, cfg.MetricsInterval, cfg.SRTLAIngestPort, cfg.SRTOutputPort)
+	log.Printf("[route] 啟動 node_id=%s log_level=%s metrics_interval=%s ingest_port=%d srt_out_port=%d console_base=%s control_bind=%q",
+		cfg.NodeID, cfg.LogLevel, cfg.MetricsInterval, cfg.SRTLAIngestPort, cfg.SRTOutputPort, cfg.ConsoleBaseURL, cfg.ControlBind)
 
 	// 套用 Route 節點需求的基礎網路緩衝調整（若失敗僅記錄警告，不中斷啟動）。
 	system.ApplyNetTuning(nil)
