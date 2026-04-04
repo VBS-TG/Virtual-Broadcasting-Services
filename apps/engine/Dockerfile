@@ -25,10 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir pyyaml
 
 WORKDIR /opt/brave
+COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_brave_pipfile.py
 # Brave Pipfile 含 vext / gobject / pip 版 pygobject，在 slim CI 映像常失敗；改用 apt 的 python3-gi。
 # Pillow 需 JPEG/zlib/freetype 等 dev 套件（見上方 apt）。
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
-    && sed -i '/^vext = /d; /^gobject = /d; /^pygobject = /d; /^pytest = /d' Pipfile \
+    && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py \
     && pip3 install --no-cache-dir --upgrade pip setuptools wheel \
     && PIPENV_VENV_IN_PROJECT=1 PIP_DEFAULT_TIMEOUT=120 \
        pipenv --python /usr/bin/python3 install --skip-lock
