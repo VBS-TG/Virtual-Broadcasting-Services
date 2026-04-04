@@ -4,7 +4,8 @@ import re
 import sys
 from pathlib import Path
 
-SKIP = frozenset({"vext", "gobject", "pygobject", "pytest"})
+# gbulb 會拉 PyPI 的 pygobject（需編譯），與 apt 的 python3-gi 衝突；Brave 執行期未使用 gbulb。
+SKIP = frozenset({"vext", "gobject", "pygobject", "pytest", "gbulb"})
 
 
 def main() -> None:
