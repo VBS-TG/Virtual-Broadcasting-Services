@@ -38,17 +38,29 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
          'pillow>=9.5,<12' \
          'psutil>=5.6,<6' \
     && python3 - <<'PY'
+# 不可先 import sanic（會先載入未修補的 blueprint_group，在 Py3.10 直接崩潰）
 import pathlib
-import sanic
+import site
 
-p = pathlib.Path(sanic.__file__).resolve().parent / "blueprint_group.py"
-t = p.read_text(encoding="utf-8")
-t = t.replace(
-    "from collections import MutableSequence",
-    "from collections.abc import MutableSequence",
-)
-p.write_text(t, encoding="utf-8")
+patched = False
+for sp in site.getsitepackages():
+    p = pathlib.Path(sp) / "sanic" / "blueprint_group.py"
+    if not p.is_file():
+        continue
+    t = p.read_text(encoding="utf-8")
+    t2 = t.replace(
+        "from collections import MutableSequence",
+        "from collections.abc import MutableSequence",
+    )
+    if t == t2:
+        raise SystemExit(f"sanic patch: expected line not in {p}")
+    p.write_text(t2, encoding="utf-8")
+    patched = True
+    break
+if not patched:
+    raise SystemExit("sanic patch: blueprint_group.py not found under site-packages")
 PY
+    && python3 -c "import sanic; import sanic.app"
 
 WORKDIR /opt/brave
 COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_brave_pipfile.py
