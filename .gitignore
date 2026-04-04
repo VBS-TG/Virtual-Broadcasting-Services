@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 環境檔（含密鑰）；範例檔 *.example 仍納入版控
+.env
+.env*
+!.env*.example
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+/vendor/
+
+# OS / 編輯器
+.DS_Store
+Thumbs.db
+*.swp
+*~
