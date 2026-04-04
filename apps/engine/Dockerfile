@@ -30,14 +30,16 @@ COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_br
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
     && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py
 
+# 勿安裝 gbulb：其依賴會拉 PyPI pygobject 並從原始碼編譯，與 apt 的 python3-gi 衝突。
+# sanic 鎖 19.3.1（與 Brave 相容）；uvloop 為 brave/api 直接 import（需含 py3.10 manylinux wheel，勿用 0.14）。
 RUN python3 -m venv --system-site-packages .venv \
     && .venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
     && .venv/bin/pip install --no-cache-dir \
          'pyyaml>=5.1,<7' \
-         'gbulb>=0.6.1,<1' \
-         'sanic>=19.3.1,<20' \
+         'sanic==19.3.1' \
+         'uvloop>=0.21,<0.23' \
          'pillow>=9.5,<12' \
-         'psutil>=5.9,<6'
+         'psutil>=5.6,<6'
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/entrypoint.sh /opt/vbs-engine/scripts/entrypoint.sh
