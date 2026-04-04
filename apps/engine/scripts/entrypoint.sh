@@ -35,7 +35,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "[vbs-engine] 啟動 Brave…"
-/opt/brave/.venv/bin/python brave.py -c "${VBS_ENGINE_BRAVE_CONFIG_PATH:-/tmp/brave.yaml}" &
+python3 brave.py -c "${VBS_ENGINE_BRAVE_CONFIG_PATH:-/tmp/brave.yaml}" &
 BRAVE_PID=$!
 
 echo "[vbs-engine] 等待 Brave TCP PGM (${TCP_PORT})…"
