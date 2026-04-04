@@ -29,7 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && gst-inspect-1.0 interaudiosink >/dev/null \
     && gst-inspect-1.0 queue >/dev/null
 
-# 系統 Python 依賴（與 python3-gi 同行程載入 Gst）
+COPY apps/engine/scripts/patch_sanic_py310.py /opt/vbs-engine/scripts/patch_sanic_py310.py
+
+# 系統 Python 依賴（與 python3-gi 同行程載入 Gst）；Sanic 修補用獨立腳本（避免 Dockerfile heredoc 解析問題）
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
     && pip3 install --no-cache-dir \
          'pyyaml>=5.1,<7' \
@@ -37,29 +39,8 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
          'uvloop>=0.21,<0.23' \
          'pillow>=9.5,<12' \
          'psutil>=5.6,<6' \
-    && python3 - <<'PY'
-# 不可先 import sanic（會先載入未修補的 blueprint_group，在 Py3.10 直接崩潰）
-import pathlib
-import site
-
-patched = False
-for sp in site.getsitepackages():
-    p = pathlib.Path(sp) / "sanic" / "blueprint_group.py"
-    if not p.is_file():
-        continue
-    t = p.read_text(encoding="utf-8")
-    t2 = t.replace(
-        "from collections import MutableSequence",
-        "from collections.abc import MutableSequence",
-    )
-    if t == t2:
-        raise SystemExit(f"sanic patch: expected line not in {p}")
-    p.write_text(t2, encoding="utf-8")
-    patched = True
-    break
-if not patched:
-    raise SystemExit("sanic patch: blueprint_group.py not found under site-packages")
-PY && python3 -c "import sanic; import sanic.app"
+    && python3 /opt/vbs-engine/scripts/patch_sanic_py310.py \
+    && python3 -c "import sanic; import sanic.app"
 
 WORKDIR /opt/brave
 COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_brave_pipfile.py
@@ -79,17 +60,9 @@ e=Gst.ElementFactory.make('queue','_q'); assert e, 'queue'" \
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/entrypoint.sh /opt/vbs-engine/scripts/entrypoint.sh
-RUN python3 - <<'PY'
-from pathlib import Path
-for p in (
-    Path("/opt/vbs-engine/scripts/entrypoint.sh"),
-    Path("/opt/vbs-engine/scripts/generate_brave_config.py"),
-):
-    b = p.read_bytes()
-    if b.startswith(b"\xef\xbb\xbf"):
-        p.write_bytes(b[3:])
-PY
-RUN chmod +x /opt/vbs-engine/scripts/entrypoint.sh
+COPY apps/engine/scripts/strip_engine_script_bom.py /opt/vbs-engine/scripts/strip_engine_script_bom.py
+RUN python3 /opt/vbs-engine/scripts/strip_engine_script_bom.py \
+    && chmod +x /opt/vbs-engine/scripts/entrypoint.sh
 
 WORKDIR /opt/brave
 
