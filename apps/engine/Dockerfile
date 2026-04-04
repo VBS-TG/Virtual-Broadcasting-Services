@@ -19,20 +19,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-nice \
     ffmpeg iproute2 \
-    pipenv \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --no-cache-dir pyyaml
 
 WORKDIR /opt/brave
 COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_brave_pipfile.py
-# Brave Pipfile 含 vext / gobject / pip 版 pygobject，在 slim CI 映像常失敗；改用 apt 的 python3-gi。
-# Pillow 需 JPEG/zlib/freetype 等 dev 套件（見上方 apt）。
+# Brave Pipfile 含 vext / pip 版 pygobject 等；改以 pip 安裝並保留 system-site-packages 給 apt 的 python3-gi。
+# （pipenv install --skip-lock 在 GHA 常解析失敗或逾時。）
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
     && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py \
-    && pip3 install --no-cache-dir --upgrade pip setuptools wheel \
-    && PIPENV_VENV_IN_PROJECT=1 PIP_DEFAULT_TIMEOUT=120 \
-       pipenv --python /usr/bin/python3 install --skip-lock
+    && python3 -m venv --system-site-packages .venv \
+    && .venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && .venv/bin/pip install --no-cache-dir \
+         'pyyaml>=5.1,<7' \
+         'gbulb>=0.6.1,<1' \
+         'sanic>=19.3.1,<20' \
+         'pillow>=9.5,<12' \
+         'psutil>=5.9,<6'
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/entrypoint.sh /opt/vbs-engine/scripts/entrypoint.sh
