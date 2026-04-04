@@ -12,7 +12,7 @@ ENV NVIDIA_DRIVER_CAPABILITIES=all
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git \
     build-essential \
-    python3 python3-pip python3-dev python3-gi python3-gst-1.0 \
+    python3 python3-pip python3-venv python3-dev python3-gi python3-gst-1.0 \
     gir1.2-gst-plugins-bad-1.0 libcairo2-dev libgirepository1.0-dev pkg-config \
     gobject-introspection \
     libjpeg-dev zlib1g-dev libopenjp2-7-dev libtiff5-dev libfreetype6-dev \
@@ -26,10 +26,11 @@ RUN pip3 install --no-cache-dir pyyaml
 WORKDIR /opt/brave
 COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_brave_pipfile.py
 # Brave Pipfile 含 vext / pip 版 pygobject 等；改以 pip 安裝並保留 system-site-packages 給 apt 的 python3-gi。
-# （pipenv install --skip-lock 在 GHA 常解析失敗或逾時。）
+# python3-venv：否則 `python3 -m venv` 在最小映像會失敗（需與 python3 一併安裝）。
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
-    && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py \
-    && python3 -m venv --system-site-packages .venv \
+    && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py
+
+RUN python3 -m venv --system-site-packages .venv \
     && .venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
     && .venv/bin/pip install --no-cache-dir \
          'pyyaml>=5.1,<7' \
