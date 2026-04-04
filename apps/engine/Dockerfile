@@ -47,7 +47,8 @@ COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_br
 COPY apps/engine/scripts/patch_brave_uri_playbin_for_srt.py /opt/vbs-engine/scripts/patch_brave_uri_playbin_for_srt.py
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
     && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py \
-    && python3 /opt/vbs-engine/scripts/patch_brave_uri_playbin_for_srt.py
+    && python3 /opt/vbs-engine/scripts/patch_brave_uri_playbin_for_srt.py \
+    && grep -q "lower().startswith('srt')" brave/inputs/uri.py
 
 # 與執行期相同：系統 python3 + Gst 能建立 intervideosink / queue
 RUN for d in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 /usr/lib/aarch64-linux-gnu/gstreamer-1.0; do \
