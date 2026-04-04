@@ -1,6 +1,16 @@
 ﻿#!/usr/bin/bash
 set -euo pipefail
 
+# 少數容器環境下 Gst 未掃到 plugins-bad 的 inter*；明確指向 multiarch 外掛目錄
+if [[ -z "${GST_PLUGIN_PATH:-}" ]]; then
+  for _gst in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 /usr/lib/aarch64-linux-gnu/gstreamer-1.0; do
+    if [[ -d "${_gst}" ]]; then
+      export GST_PLUGIN_PATH="${_gst}"
+      break
+    fi
+  done
+fi
+
 if [[ -z "${VBS_ENGINE_SRT_INPUT_1_URI:-}" || -z "${VBS_ENGINE_SRT_INPUT_2_URI:-}" ]]; then
   echo "錯誤: 請設定 VBS_ENGINE_SRT_INPUT_1_URI 與 VBS_ENGINE_SRT_INPUT_2_URI" >&2
   exit 1
