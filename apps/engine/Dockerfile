@@ -59,8 +59,7 @@ for sp in site.getsitepackages():
     break
 if not patched:
     raise SystemExit("sanic patch: blueprint_group.py not found under site-packages")
-PY
-    && python3 -c "import sanic; import sanic.app"
+PY && python3 -c "import sanic; import sanic.app"
 
 WORKDIR /opt/brave
 COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_brave_pipfile.py
