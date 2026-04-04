@@ -75,3 +75,40 @@
 ```
 
 可僅送需要變更的欄位；成功後 Route 會重啟媒體管線以套用新參數。
+
+---
+
+## VBS-Engine（`apps/engine`）
+
+基於 [BBC Brave](https://github.com/bbc/brave)（GStreamer）：**2 路 SRT（`uri` 入）**、左右分割 **mixer**、**WebRTC** 監看（Brave 內建網頁/API，**非**標準 WHEP；標準 WHEP 可後續再換）、**TCP MPEG** 接 **ffmpeg** 再以 **SRT Caller** 輸出 **PGM**。  
+**WSS 遙測**：本階段未實作，預留後續與 Route 一致之上報。
+
+### 環境變數（Engine 容器）
+
+| 變數 | 必填 | 說明 |
+| :--- | :--- | :--- |
+| `VBS_ENGINE_SRT_INPUT_1_URI` | 是 | 第一路 SRT Caller URI（例 `srt://route.example.com:20030?mode=caller&latency=2000&passphrase=...&pbkeylen=32`） |
+| `VBS_ENGINE_SRT_INPUT_2_URI` | 是 | 第二路（測試可與第一路相同 URI 複製畫面） |
+| `VBS_ENGINE_PGM_SRT_URI` | 是 | PGM 輸出之 SRT Caller 完整 URI（ffmpeg 以 mpegts 送出） |
+| `VBS_ENGINE_MIXER_WIDTH` | 否 | 預設 `854`（約 480p 16:9 寬） |
+| `VBS_ENGINE_MIXER_HEIGHT` | 否 | 預設 `480` |
+| `VBS_ENGINE_PGM_TCP_PORT` | 否 | Brave 內部 TCP 伺服器埠，預設 `30090`（僅本機環，`ffmpeg` 連線用） |
+| `PORT` / `VBS_ENGINE_API_PORT` | 否 | Brave REST/Web 預設 `5000` |
+| `VBS_ENGINE_STUN_SERVER` | 否 | WebRTC 用，預設 `stun.l.google.com:19302` |
+
+### 埠（預設，Engine 埠區 `30010…`）
+
+| 用途 | 預設 |
+| :--- | :--- |
+| Brave HTTP / WebRTC 信令與內建 UI | `5000` TCP（`network_mode: host` 時為主機 `5000`） |
+| 內部 PGM 橋接（ffmpeg→Brave TCP） | `30090` TCP（僅容器內，可不對外） |
+
+### CI/CD
+
+- Workflow：`.github/workflows/vbs-engine-publish.yml`
+- 映像：`ghcr.io/<owner小寫>/<repo小寫>/vbs-engine`
+
+### 部署
+
+- `docker compose -f docker-compose.engine.yml --env-file .env.engine up --build`
+- 需 **NVIDIA Container Toolkit** 與主機驅動；映像基底為 `nvidia/cuda:12.2.0-runtime-ubuntu22.04`。
