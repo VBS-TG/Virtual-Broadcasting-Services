@@ -112,3 +112,17 @@
 
 - `docker compose -f docker-compose.engine.yml --env-file .env.engine up --build`
 - 需 **NVIDIA Container Toolkit** 與主機驅動；映像基底為 `nvidia/cuda:12.2.0-runtime-ubuntu22.04`。
+- **SRT 輸入 URI**：請使用小寫 scheme，例如 `srt://...`。若使用 `SRT://...`（大寫），舊版映像可能仍走 `playbin3` 而觸發 GStreamer 錯誤；請 **重建映像**（含 `patch_brave_uri_playbin_for_srt` 之 **不分大小寫** 判斷）或改為小寫。
+
+### Nginx 反代（HTTPS / WebSocket）
+
+- 範例設定：`apps/engine/deploy/nginx-vbs-engine.conf.example`（反代至 `127.0.0.1:5000`，含 `Upgrade` / `Connection`）。
+- 對外只開 **443**（及 **80** 若需導向 HTTPS）；**勿對外直連 5000**，或以防火牆限制。
+- **SRT（UDP）不經 Nginx**，仍依環境變數 URI 與網路防火牆。
+
+### 除錯（常見：`Unable to add element intervideosink`）
+
+1. **確認已拉最新 `feature/engine` 並 `--no-cache` 重建**：`docker compose build --no-cache`。
+2. **確認容器內已套用 SRT→playbin**：`docker exec -it <容器名> grep -n is_srt /opt/brave/brave/inputs/uri.py`，應見 `lower().startswith('srt')`。
+3. **環境檔 URI**：`VBS_ENGINE_SRT_INPUT_*_URI` 建議 `srt://` 小寫開頭。
+4. **容器內 GStreamer**：`docker exec -it <容器名> gst-inspect-1.0 intervideosink | head`；`GST_DEBUG=3` 可暫時加在 `docker compose` 的 `environment` 以取得載入外掛日誌（除錯完刪除）。
