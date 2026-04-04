@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   vbs-route:
     build:
@@ -10,9 +8,19 @@ services:
       - VBS_NODE_ID=vbs-route-01
       - VBS_LOG_LEVEL=info
       - VBS_METRICS_INTERVAL=1000ms
-      - VBS_SRT_PASSPHRASE
-      - VBS_ROUTE_SRTLA_INGEST_PORT=10020
-      - VBS_ROUTE_SRT_OUTPUT_PORT=10030
-    # volumes:
-    #   - ./logs/route:/var/log/vbs-route
-
+      # 必填：請改為實際 Console HTTPS 基底與金鑰（勿提交真實值至版本庫）
+      - VBS_CONSOLE_BASE_URL=${VBS_CONSOLE_BASE_URL}
+      - VBS_API_KEY=${VBS_API_KEY}
+      - VBS_SRT_PASSPHRASE=${VBS_SRT_PASSPHRASE}
+      - VBS_ROUTE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
+      - VBS_ROUTE_SRTLA_INGEST_PORT=20020
+      - VBS_ROUTE_SRT_OUTPUT_PORT=20030
+      - VBS_ROUTE_INTERNAL_SRT_PORT=20021
+      - VBS_ROUTE_LOSS_MAX_TTL=40
+      - VBS_ROUTE_SRT_LATENCY_MS=2000
+      - VBS_ROUTE_INGEST_IFACE=eth0
+      # 預設啟動控制面；若要關閉請設 VBS_ROUTE_CONTROL_BIND=
+      - VBS_ROUTE_CONTROL_BIND=:20080
+      # 選用：行動網路 MTU（需映像內有 ip 指令，已於 Dockerfile 安裝 iproute2）
+      # - VBS_ROUTE_MTU_IFACE=eth0
+      # - VBS_ROUTE_MTU=1400

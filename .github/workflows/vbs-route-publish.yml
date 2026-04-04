@@ -1,0 +1,86 @@
+# 對應 .cursorrules §7.4：
+# - Merge to main → 推送 :latest（正式線、可部署測試）
+# - Tag v* → 正式 Release 推送語意化版本（§7.3），且標籤提交須屬於 main 歷程
+# 功能分支不觸發本 workflow（僅 main / 合規之 v*）
+
+name: Publish VBS-Route (GHCR)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "apps/route/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/vbs-route-publish.yml"
+
+concurrency:
+  group: vbs-route-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 結帳原始碼（完整歷程，供標籤與 main 對照）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 標籤須指向 main 歷程（正式發布）
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "::error::依 .cursorrules §7，部署映像僅自 main 正式線發布；此標籤所指提交不在 origin/main 歷程上，已中止。"
+            exit 1
+          fi
+          echo "標籤提交已確認為 main 之祖先，允許發布版本映像。"
+
+      - name: 映像全名（ghcr.io，小寫）
+        id: img
+        run: |
+          R=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=ghcr.io/${R}/vbs-route" >> "$GITHUB_OUTPUT"
+
+      - name: Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登入 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 映像標籤（metadata）
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.img.outputs.name }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+
+      - name: 建置並推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/route/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64

@@ -5,26 +5,39 @@ import (
 	"log"
 
 	"vbs/apps/route/internal/config"
+	"vbs/apps/route/internal/ctrl"
+	"vbs/apps/route/internal/rtstate"
 	"vbs/apps/route/internal/srtla"
 	"vbs/apps/route/internal/telemetry"
 )
 
-// Run 啟動 Route 節點的核心處理流程。
-// MVP 階段僅負責啟動單一 SRTLA → SRT pipeline，並交由其內建 watchdog 管理。
+// Run 啟動 Route：SRTLA→SRT 管線、遙測上報、可選控制面 HTTP。
 func Run(ctx context.Context, cfg config.Config) {
 	logger := log.Default()
 
-	pipeline := srtla.NewPipeline(srtla.PipelineConfig{
-		NodeID:          cfg.NodeID,
-		SRTPassphrase:   cfg.SRTPassphrase,
-		SRTLAIngestPort: cfg.SRTLAIngestPort,
-		SRTOutputPort:   cfg.SRTOutputPort,
-	}, logger)
+	buf := rtstate.NewBuffer(cfg.LossMaxTTL, cfg.LatencyMs)
+	restartCh := make(chan struct{}, 1)
 
-	go pipeline.Run(ctx)
-	go telemetry.StartLocalLogger(ctx, cfg, logger)
+	getCfg := func() srtla.PipelineConfig {
+		loss, lat := buf.Snapshot()
+		return srtla.PipelineConfig{
+			NodeID:          cfg.NodeID,
+			SRTPassphrase:   cfg.SRTPassphrase,
+			SRTLAIngestPort: cfg.SRTLAIngestPort,
+			SRTOutputPort:   cfg.SRTOutputPort,
+			InternalSRTPort: cfg.InternalSRTPort,
+			LossMaxTTL:      loss,
+			LatencyMs:       lat,
+		}
+	}
 
-	// 後續可在此擴充：例如多條 pipeline、健康檢查、對 Console WebSocket Hub 的遙測上報等。
+	pipeline := srtla.NewPipeline(getCfg, logger)
+	go pipeline.Run(ctx, restartCh)
+
+	collector := telemetry.NewIngestCollector(cfg.IngestIface)
+	go telemetry.StartReporter(ctx, cfg, logger, pipeline, collector, restartCh)
+
+	ctrl.Start(ctx, cfg, buf, restartCh, logger)
+
 	<-ctx.Done()
 }
-

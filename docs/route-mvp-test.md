@@ -1,57 +1,43 @@
-# VBS-Route MVP 測試流程說明
+# VBS-Route 部署與驗證說明（正式執行）
 
-本文件描述在 MVP 階段驗證 Route 節點的建議測試步驟，實際操作時請依部署環境調整指令。
+本文件說明在 AWS EC2（linux/amd64）上以正式設定驗證 Route 節點的建議步驟。
 
 ## 前置條件
 
-- 已在 AWS EC2（linux/amd64）節點部署本專案程式碼。
-- 節點已加入 Tailscale，並可透過 MagicDNS 由其他節點存取。
-- 已安裝 Docker 與 Docker Compose。
+- 已準備 **Console** 端可接受之 **HTTPS** 基底網址（`VBS_CONSOLE_BASE_URL`）及對應 **WSS** 遙測端點（見 `protocol.md`）。
+- 已產生 **`VBS_API_KEY`**（與 Console 後端約定，請求標頭 `X-VBS-Key`）。
+- **`VBS_SRT_PASSPHRASE`** 長度 10–64 字元（全系統 SRT AES-256）。
+- 安全群組／防火牆已放行 Route 埠區 UDP（預設 `20020`、`20030` 等）及控制面 TCP（預設 `20080`，若啟用）。
 
-## 啟動 Route 節點
+## 啟動
 
-1. 在 EC2 節點上進入專案根目錄。
-2. 設定必要環境變數（例）：
-   - `VBS_SRT_PASSPHRASE`：SRT/SRTLA AES-256 passphrase。
-3. 以 docker-compose 啟動：
-   - `docker-compose -f docker-compose.route.yml up --build -d`
+### 方式 A：使用 CI 推送之映像（建議於測試機）
 
-預期結果：
+1. 確認 `main` 已合併且 GitHub Actions **Publish VBS-Route (GHCR)** 成功，或已打標籤 `v*` 並完成建置。
+2. `docker login ghcr.io`（需可讀取該套件之權限）。
+3. 拉取映像（請將路徑換成你們實際的 owner/repo，小寫）：
+   - `docker pull ghcr.io/vbs-tg/virtual-broadcasting-services/vbs-route:latest`
+4. 以 `docker run --network host -e VBS_CONSOLE_BASE_URL=... -e VBS_API_KEY=... -e VBS_SRT_PASSPHRASE=... ... ghcr.io/.../vbs-route:latest` 或自行撰寫 compose **image:** 欄位指向上述映像。
 
-- 服務啟動後，在容器 log 中可看到 Route 啟動訊息與 sysctl 套用結果。
-- 每 `VBS_METRICS_INTERVAL` 週期可看到一行 `[route][telemetry] { ... }` JSON。
+### 方式 B：於建置機本地 build
 
-## 模擬 Capture 端推送 SRTLA/SRT 流
+1. 於專案根目錄設定環境變數（至少 `VBS_CONSOLE_BASE_URL`、`VBS_API_KEY`、`VBS_SRT_PASSPHRASE`）。
+2. 執行：`docker compose -f docker-compose.route.yml up --build -d`
+3. 檢查日誌：應見 `[route] 啟動`、sysctl／可選 MTU、`[route][telemetry]` JSON，以及 WSS 上報成功或錯誤訊息。
 
-> 視實際工具而定，此處僅提供概念示意。
+## 健康檢查
 
-1. 在測試機或 Capture 節點，使用對應的 SRTLA Sender 或 ffmpeg/srt-live-transmit 對 `VBS-Route` 的 `Route-SRTLA-Ingest / 10020` 發送測試流。
-2. 確認網路安全性與防火牆已允許對應 UDP 連線。
+- `GET http://<主機>:20080/healthz`（無需 Key）應回 `{"status":"ok"}`。
+- 動態調整緩衝：`POST http://<主機>:20080/api/v1/route/buffer`，標頭 `X-VBS-Key`，JSON 見 `protocol.md`。
 
-## 從 Engine 端驗證 SRT 輸出
+## 串流驗證
 
-1. 在 Engine 節點或任一可達到 Route 的節點上，使用 SRT Caller 連線：
-   - 目標：`srt://vbs-route:10030?mode=caller`
-2. 可使用支援 SRT 的播放器（如 ffplay、VLC、OBS 等）確認是否能看到連續影像或測試圖樣。
+1. 由 Capture 或測試端向 Route **SRTLA ingest**（預設 `20020`）送流。
+2. 由 Engine 或測試端以 SRT Caller 連 **SRT 輸出**（預設 `20030`），`passphrase` 與全系統一致。
 
-預期結果：
+## 遙測
 
-- 當 Capture 端持續送流時，SRT Caller 能穩定接收到視訊訊號。
-- 若中斷 Capture 端，Route 不應崩潰，待恢復推流後，SRT Caller 能重新看到畫面。
+- 每秒至多一筆 JSON（≤255 bytes）送往 Console **WSS**，並寫入容器日誌。
+- **ingest 停滯自癒**：預設在曾偵測到 ≥0.5 Mbps 後，若連續 5 秒近零 ingest，會觸發管線重啟；可設 `VBS_ROUTE_STALL_INGEST_SECONDS=0` 關閉。
 
-## Watchdog 行為驗證
-
-1. 進入 Route 容器的 shell。
-2. 手動終止由 Route 啟動的 SRTLA/SRT 子進程（例如使用 `kill` 指令）。
-3. 觀察 Route 容器 log：
-   - 應可看到 pipeline 結束的錯誤訊息。
-   - 並在一段退避時間後重新啟動該子進程。
-
-## 遙測輸出驗證
-
-1. 透過 `docker logs vbs-route` 觀察 `[route][telemetry]` 行。
-2. 驗證：
-   - JSON 格式正確，包含 `node_id`、`mem_bytes` 等欄位。
-   - 單行長度不超過 255 bytes（可視覺檢查或另行統計）。
-
-以上測試完成後，即可確認 Route MVP 在「SRTLA 輸入 → SRT 輸出」、「基本自癒能力」以及「本地遙測輸出」三個面向上達到預期行為，後續即可再接上 Console WebSocket Hub 與更進階的參數調整功能。
+完成以上項目後，即可視為 Route 節點在正式條件下可運作；後續再串接其他節點與 `/packages/shared` 協定。
