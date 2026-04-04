@@ -16,10 +16,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gir1.2-gst-plugins-bad-1.0 libcairo2-dev libgirepository1.0-dev pkg-config \
     gobject-introspection \
     libjpeg-dev zlib1g-dev libopenjp2-7-dev libtiff5-dev libfreetype6-dev \
+    libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libgstreamer-plugins-bad1.0-0 \
+    liborc-0.4-0 \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-nice \
     ffmpeg iproute2 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && gst-inspect-1.0 intervideosink >/dev/null \
+    && gst-inspect-1.0 interaudiosink >/dev/null \
+    && gst-inspect-1.0 queue >/dev/null
 
 RUN pip3 install --no-cache-dir pyyaml
 
