@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev python3-gi python3-gst-1.0 \
     gir1.2-gst-plugins-bad-1.0 libcairo2-dev libgirepository1.0-dev pkg-config \
     gobject-introspection \
+    libjpeg-dev zlib1g-dev libopenjp2-7-dev libtiff5-dev libfreetype6-dev \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-nice \
     ffmpeg iproute2 \
@@ -24,8 +25,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir pyyaml
 
 WORKDIR /opt/brave
+# Brave Pipfile 含 vext / gobject / pip 版 pygobject，在 slim CI 映像常失敗；改用 apt 的 python3-gi。
+# Pillow 需 JPEG/zlib/freetype 等 dev 套件（見上方 apt）。
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
-    && PIPENV_VENV_IN_PROJECT=1 pipenv --python python3 install --skip-lock
+    && sed -i '/^vext = /d; /^gobject = /d; /^pygobject = /d; /^pytest = /d' Pipfile \
+    && pip3 install --no-cache-dir --upgrade pip setuptools wheel \
+    && PIPENV_VENV_IN_PROJECT=1 PIP_DEFAULT_TIMEOUT=120 \
+       pipenv --python /usr/bin/python3 install --skip-lock
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/entrypoint.sh /opt/vbs-engine/scripts/entrypoint.sh
