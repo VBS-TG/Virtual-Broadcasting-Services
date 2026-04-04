@@ -51,4 +51,3 @@ ffmpeg -hide_banner -loglevel info \
 FF_PID=$!
 
 wait "$BRAVE_PID" "$FF_PID"
-

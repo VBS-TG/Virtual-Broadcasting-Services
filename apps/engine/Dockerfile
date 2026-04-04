@@ -39,10 +39,24 @@ RUN python3 -m venv --system-site-packages .venv \
          'sanic==19.3.1' \
          'uvloop>=0.21,<0.23' \
          'pillow>=9.5,<12' \
-         'psutil>=5.6,<6'
+         'psutil>=5.6,<6' \
+    && sed -i 's/from collections import MutableSequence/from collections.abc import MutableSequence/' \
+         .venv/lib/python3.10/site-packages/sanic/blueprint_group.py \
+    && .venv/bin/python -c "import sanic; import sanic.app"
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/entrypoint.sh /opt/vbs-engine/scripts/entrypoint.sh
+# Windows 編輯器可能寫入 UTF-8 BOM，會讓 shebang 變成 ﻿#!/... 而無法執行
+RUN python3 - <<'PY'
+from pathlib import Path
+for p in (
+    Path("/opt/vbs-engine/scripts/entrypoint.sh"),
+    Path("/opt/vbs-engine/scripts/generate_brave_config.py"),
+):
+    b = p.read_bytes()
+    if b.startswith(b"\xef\xbb\xbf"):
+        p.write_bytes(b[3:])
+PY
 RUN chmod +x /opt/vbs-engine/scripts/entrypoint.sh
 
 WORKDIR /opt/brave
