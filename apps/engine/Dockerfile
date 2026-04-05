@@ -30,8 +30,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && gst-inspect-1.0 queue >/dev/null
 
 COPY apps/engine/scripts/patch_sanic_py310.py /opt/vbs-engine/scripts/patch_sanic_py310.py
+COPY apps/engine/scripts/patch_websockets_py310.py /opt/vbs-engine/scripts/patch_websockets_py310.py
 
-# 系統 Python 依賴（與 python3-gi 同行程載入 Gst）；Sanic 修補用獨立腳本（避免 Dockerfile heredoc 解析問題）
+# 系統 Python 依賴（與 python3-gi 同行程載入 Gst）；Sanic / websockets 修補用獨立腳本（避免 Dockerfile heredoc 解析問題）
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
     && pip3 install --no-cache-dir \
          'pyyaml>=5.1,<7' \
@@ -40,6 +41,7 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
          'pillow>=9.5,<12' \
          'psutil>=5.6,<6' \
     && python3 /opt/vbs-engine/scripts/patch_sanic_py310.py \
+    && python3 /opt/vbs-engine/scripts/patch_websockets_py310.py \
     && python3 -c "import sanic; import sanic.app"
 
 WORKDIR /opt/brave
