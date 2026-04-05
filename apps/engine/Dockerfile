@@ -45,10 +45,13 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
 WORKDIR /opt/brave
 COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_brave_pipfile.py
 COPY apps/engine/scripts/patch_brave_uri_playbin_for_srt.py /opt/vbs-engine/scripts/patch_brave_uri_playbin_for_srt.py
+COPY apps/engine/scripts/patch_brave_input_add_element.py /opt/vbs-engine/scripts/patch_brave_input_add_element.py
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
     && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py \
     && python3 /opt/vbs-engine/scripts/patch_brave_uri_playbin_for_srt.py \
-    && grep -q "lower().startswith('srt')" brave/inputs/uri.py
+    && python3 /opt/vbs-engine/scripts/patch_brave_input_add_element.py \
+    && grep -q "lower().startswith('srt')" brave/inputs/uri.py \
+    && grep -q "Unable to create element" brave/inputs/input.py
 
 # 與執行期相同：系統 python3 + Gst 能建立 intervideosink / queue
 RUN for d in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 /usr/lib/aarch64-linux-gnu/gstreamer-1.0; do \
