@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vbs.local/schemas/console-telemetry-latest.v1.schema.json",
+  "title": "Console GET /api/v1/telemetry/latest response (MVP-A)",
+  "description": "In-memory snapshot of the last accepted telemetry per node_id (keys are node_id strings).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["latest"],
+  "properties": {
+    "latest": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["node_id", "node_type", "ts_ms", "metrics", "received_at"],
+        "properties": {
+          "node_id": { "type": "string", "minLength": 1 },
+          "node_type": {
+            "type": "string",
+            "enum": ["capture", "route", "engine", "console"]
+          },
+          "ts_ms": { "type": "integer", "minimum": 0 },
+          "metrics": { "type": "object" },
+          "received_at": { "type": "string", "format": "date-time" },
+          "auth_mode": { "type": "string", "enum": ["bearer", "legacy_key"] }
+        }
+      }
+    }
+  }
+}
