@@ -127,7 +127,7 @@
 | 管線自癒（指數退避重啟） | 已實作（Brave＋ffmpeg） |
 | 可選 MTU `1400` | 已實作（`VBS_ENGINE_MTU_*`） |
 | 解碼鏈 `nvh265dec`→`glupload`→`gles2` | 未強制（Brave 預設 pipeline；見 `schemas/engine-deployment.md`） |
-| Brave HTTP JWT 中介 | 未實作（建議 Cloudflare Tunnel／Access 或專用 sidecar 邊界驗證） |
+| Brave HTTP JWT 中介 | 未實作（建議 Nginx／Tunnel 邊界驗證） |
 
 ### Cloudflare Tunnel 範本
 

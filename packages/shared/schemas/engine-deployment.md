@@ -14,4 +14,4 @@
 
 - Brave 內部解碼鏈全面改為 `nvh265dec`→`glupload`→`gles2`（需 fork／深度改 Brave pipeline）
 - 8 路靜態 VRAM 預配（需與 Brave／CUDA 配置聯動）
-- HTTP API 層 JWT 中介層（建議由 Cloudflare Tunnel／Cloudflare Access 或專用 sidecar 於邊界處理；信令入口以 `cloudflared` 為準，不再維護 Nginx 範本）
+- HTTP API 層 JWT 中介層（建議由 Nginx／Cloudflare Access 或專用 sidecar 處理）
