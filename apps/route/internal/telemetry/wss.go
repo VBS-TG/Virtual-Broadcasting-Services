@@ -12,7 +12,7 @@ import (
 	"vbs/apps/route/internal/config"
 )
 
-// WSSClient 以 WebSocket 將遙測送往 Console Hub（Header: X-VBS-Key）。
+// WSSClient 以 WebSocket 將遙測送往 Console Hub（Header: Authorization Bearer）。
 type WSSClient struct {
 	cfg    config.Config
 	dialer websocket.Dialer
@@ -36,7 +36,7 @@ func (c *WSSClient) SendOne(ctx context.Context, payload []byte) error {
 	}
 
 	header := http.Header{}
-	header.Set("X-VBS-Key", c.cfg.APIKey)
+	header.Set("Authorization", "Bearer "+c.cfg.JWTToken)
 
 	conn, resp, err := c.dialer.DialContext(ctx, wsURL, header)
 	if err != nil {

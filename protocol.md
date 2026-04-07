@@ -25,7 +25,7 @@
 | :--- | :--- | :--- |
 | `VBS_SRT_PASSPHRASE` | 是 | 全系統 SRT AES-256 密鑰，長度 10–64 字元。 |
 | `VBS_CONSOLE_BASE_URL` | 是 | Console 控制平面 HTTPS 原點（例 `https://api.example.com`）。 |
-| `VBS_API_KEY` | 是（Phase 0/1） | Legacy 認證用，Header `X-VBS-Key`。Phase 2 移除。 |
+| `VBS_ROUTE_JWT`（或 `VBS_JWT`） | 是 | Route JWT；控制面與遙測均使用 `Authorization: Bearer <JWT>`。 |
 | `VBS_NODE_ID` | 否 | 預設 `vbs-route-01`。 |
 | `VBS_ROUTE_TELEMETRY_WS_PATH` | 否 | 預設 `/vbs/telemetry/ws`。 |
 | `VBS_METRICS_INTERVAL` | 否 | 預設 `1000ms`（1Hz）。 |
@@ -48,19 +48,25 @@
 | Route-SRTLA-Ingest / 20020 | UDP/SRTLA | Listener | 媒體層 passphrase | Capture → Route |
 | Route-SRT-Internal / 20021 | UDP/SRT | `127.0.0.1` | 無（內部） | Route 內部 |
 | Route-SRT-Out / 20030 | UDP/SRT | `srt://<dns>:20030` Listener | 媒體層 passphrase | Route → Engine |
-| Route-Telemetry | WSS | `wss://<console>/vbs/telemetry/ws` | Phase 0/1：Bearer 或 `X-VBS-Key`；Phase 2：Bearer | Route → Console |
-| Route-Control-HTTP / 20080 | HTTP | `/healthz`、`/api/v1/route/buffer` | `/healthz` 無；其餘同上 | Console / 維運 → Route |
+| Route-Telemetry | WSS | `wss://<console>/vbs/telemetry/ws` | Bearer JWT | Route → Console |
+| Route-Control-HTTP / 20080 | HTTP | `/healthz`、`/api/v1/route/buffer` | `/healthz` 無；其餘 Bearer JWT | Console / 維運 → Route |
 
 ### Route-Telemetry Payload（暫行）
 
 ```json
 {
   "node_id": "vbs-route-01",
-  "cpu_percent": 12.3,
-  "mem_bytes": 12345678,
-  "total_ingest_mbps": 3.27,
-  "reorder_error_pct": 12.51,
-  "has_engine_client": true
+  "node_type": "route",
+  "ts_ms": 1712476800000,
+  "metrics": {
+    "cpu_pct": 12.3,
+    "mem_bytes": 12345678,
+    "ingest_mbps": 3.27,
+    "reorder_error_pct": 12.51,
+    "has_engine_client": true,
+    "stream_ok": true
+  },
+  "auth_mode": "bearer"
 }
 ```
 
