@@ -1,0 +1,10 @@
+﻿# Console/API 端 Cloudflare Tunnel（api 子網域）
+# 可供 REST 與 WSS 控制平面使用。
+
+tunnel: vbs-console-api
+credentials-file: /etc/cloudflared/vbs-console-api.json
+
+ingress:
+  - hostname: api.yourdomain.com
+    service: http://127.0.0.1:4000
+  - service: http_status:404

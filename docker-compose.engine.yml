@@ -22,3 +22,9 @@ services:
       - VBS_ENGINE_PGM_TCP_PORT=${VBS_ENGINE_PGM_TCP_PORT:-30090}
       # ffmpeg 輸出之 SRT Caller 完整 URI（含 passphrase 等 query）
       - VBS_ENGINE_PGM_SRT_URI=${VBS_ENGINE_PGM_SRT_URI}
+      # 可選：WebRTC TURN（Brave turn-server）
+      # - VBS_ENGINE_TURN_SERVER=${VBS_ENGINE_TURN_SERVER}
+      # 可選：1Hz 遙測至 Console（需 VBS_CONSOLE_BASE_URL）
+      # - VBS_CONSOLE_BASE_URL=${VBS_CONSOLE_BASE_URL}
+      # - VBS_API_KEY=${VBS_API_KEY}
+      # - VBS_NODE_ID=${VBS_NODE_ID:-vbs-engine}

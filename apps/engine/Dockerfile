@@ -65,6 +65,7 @@ e=Gst.ElementFactory.make('queue','_q'); assert e, 'queue'" \
     && python3 -c "import sanic; import sanic.app"
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
+COPY apps/engine/scripts/engine_telemetry.py /opt/vbs-engine/scripts/engine_telemetry.py
 COPY apps/engine/scripts/entrypoint.sh /opt/vbs-engine/scripts/entrypoint.sh
 COPY apps/engine/scripts/strip_engine_script_bom.py /opt/vbs-engine/scripts/strip_engine_script_bom.py
 RUN python3 /opt/vbs-engine/scripts/strip_engine_script_bom.py \
