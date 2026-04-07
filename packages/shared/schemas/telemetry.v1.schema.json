@@ -16,6 +16,8 @@
         "cpu_pct": {"type": "number", "minimum": 0, "maximum": 100},
         "mem_bytes": {"type": "integer", "minimum": 0},
         "ingest_mbps": {"type": "number", "minimum": 0},
+        "reorder_error_pct": {"type": "number", "minimum": 0, "maximum": 100},
+        "has_engine_client": {"type": "boolean"},
         "gpu_pct": {"type": "number", "minimum": 0, "maximum": 100},
         "vram_bytes": {"type": "integer", "minimum": 0},
         "stream_ok": {"type": "boolean"}

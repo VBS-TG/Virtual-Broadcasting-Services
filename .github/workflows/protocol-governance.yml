@@ -5,6 +5,12 @@ on:
     paths:
       - "protocol.md"
       - "packages/shared/schemas/**"
+      - "apps/route/internal/config/config.go"
+      - "apps/route/internal/ctrl/server.go"
+      - "apps/route/internal/telemetry/reporter.go"
+      - "apps/route/internal/telemetry/wss.go"
+      - "docker-compose.route.yml"
+      - "docs/route-mvp-test.md"
 
 permissions:
   contents: read
@@ -25,6 +31,13 @@ jobs:
 
           protocol_changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- protocol.md | wc -l)
           schema_changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- packages/shared/schemas | wc -l)
+          route_comm_changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+            apps/route/internal/config/config.go \
+            apps/route/internal/ctrl/server.go \
+            apps/route/internal/telemetry/reporter.go \
+            apps/route/internal/telemetry/wss.go \
+            docker-compose.route.yml \
+            docs/route-mvp-test.md | wc -l)
 
           if [ "$protocol_changed" -gt 0 ] && [ "$schema_changed" -eq 0 ]; then
             echo "::error::protocol.md 有變更，但 packages/shared/schemas 未同步更新。"
@@ -33,6 +46,11 @@ jobs:
 
           if [ "$schema_changed" -gt 0 ] && [ "$protocol_changed" -eq 0 ]; then
             echo "::error::shared schema 有變更，但 protocol.md 未同步更新。"
+            exit 1
+          fi
+
+          if [ "$route_comm_changed" -gt 0 ] && [ "$protocol_changed" -eq 0 ] && [ "$schema_changed" -eq 0 ]; then
+            echo "::error::Route 通訊層變更需同步更新 protocol.md 或 packages/shared/schemas。"
             exit 1
           fi
 

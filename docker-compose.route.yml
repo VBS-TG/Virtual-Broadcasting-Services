@@ -8,9 +8,9 @@ services:
       - VBS_NODE_ID=vbs-route-01
       - VBS_LOG_LEVEL=info
       - VBS_METRICS_INTERVAL=1000ms
-      # 必填：請改為實際 Console HTTPS 基底與金鑰（勿提交真實值至版本庫）
+      # 必填：請改為實際 Console HTTPS 基底與 JWT（勿提交真實值至版本庫）
       - VBS_CONSOLE_BASE_URL=${VBS_CONSOLE_BASE_URL}
-      - VBS_API_KEY=${VBS_API_KEY}
+      - VBS_ROUTE_JWT=${VBS_ROUTE_JWT}
       - VBS_SRT_PASSPHRASE=${VBS_SRT_PASSPHRASE}
       - VBS_ROUTE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
       - VBS_ROUTE_SRTLA_INGEST_PORT=20020
