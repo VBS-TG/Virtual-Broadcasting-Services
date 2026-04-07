@@ -137,11 +137,48 @@
 
 ---
 
+## VBS-Console（`apps/console`，MVP-A）
+
+Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 **節點最新狀態內存快照** 的最小服務；預設 HTTP `:4000`，對外可經 Cloudflare Tunnel（見 `docs/deploy/cloudflared-api.example.yml`）。
+
+### 環境變數（Console 行程）
+
+| 變數 | 必填 | 說明 |
+| :--- | :--- | :--- |
+| `VBS_CONSOLE_JWT_SECRET` | 是 | HS256 簽章密鑰；Route/Engine 所持 JWT 須由此密鑰簽出。 |
+| `VBS_CONSOLE_ADMIN_TOKEN` | 強烈建議 | 發放 JWT（`POST /api/v1/auth/token`）與查詢 `GET /api/v1/telemetry/latest`（`X-Console-Admin` 或 Bearer 等值）之共享密鑰；未設定時發證端點回 503。 |
+| `VBS_CONSOLE_HTTP_BIND` | 否 | 預設 `:4000`。 |
+| `VBS_CONSOLE_JWT_TTL_SEC` | 否 | 簽發 token 有效期（秒），預設 `3600`，最小 `60`。 |
+| `VBS_CONSOLE_TELEMETRY_MAX_BYTES` | 否 | 單筆 WS 訊息上限，預設 `255`（與 1Hz／≤255B 規範一致）。 |
+
+### 服務表（Console）
+
+| Service / Port | Protocol | Endpoint | Auth Mode | Node Context |
+| --- | --- | --- | --- | --- |
+| Console-HTTP / 4000 | HTTP | `GET /healthz` | 無 | 健康檢查 |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/auth/token` | `X-Console-Admin` 或 `Authorization: Bearer <admin token>` | 簽發節點 JWT（claims：`sub`=node_id、`role`、`exp`） |
+| Console-Telemetry | WS/WSS | `GET /vbs/telemetry/ws`（Upgrade） | `Authorization: Bearer <JWT>`；`role` 須為 `capture`／`route`／`engine`／`console` | Route/Engine/Capture → Console |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `X-Console-Admin` 或 Bearer admin JWT | 讀取每節點最近一次遙測（內存） |
+
+### JWT（MVP-A）
+
+- 演算法：`HS256`。
+- 節點權杖：`role` 為上表節點類型或 `admin`（後者不可用於遙測 WS，僅可查詢／維運）。
+- 客戶端：Route／Engine 將簽發的 `access_token` 設入 `VBS_ROUTE_JWT`／`VBS_ENGINE_JWT`（或 `VBS_JWT`），與既有 Bearer 遙測路徑相容。
+
+### 本機驗證
+
+- `docker compose -f docker-compose.console.yml up --build`
+- 步驟見 `docs/console-mvp-test.md`。
+
+---
+
 ## 共用 Schema（單一真相）
 
 - `packages/shared/schemas/telemetry.v1.schema.json`
 - `packages/shared/schemas/control.route-buffer.v1.schema.json`
 - `packages/shared/schemas/node-status.v1.schema.json`
+- `packages/shared/schemas/console-telemetry-latest.v1.schema.json`（Console `GET /api/v1/telemetry/latest` 回應快照，MVP-A）
 
 新增或修改跨節點封包時，必須先更新上述 schema，再更新各節點實作。
 
