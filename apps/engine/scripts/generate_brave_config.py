@@ -81,6 +81,10 @@ def main() -> None:
         ],
     }
 
+    turn = os.environ.get("VBS_ENGINE_TURN_SERVER", "").strip()
+    if turn:
+        cfg["turn_server"] = turn
+
     out = os.environ.get("VBS_ENGINE_BRAVE_CONFIG_PATH", "/tmp/brave.yaml")
     with open(out, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
