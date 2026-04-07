@@ -1,56 +1,57 @@
-## VBS-Route 服務清單與通訊規範（正式執行）
+﻿## VBS 通訊規範與部署清單（v1.2 對齊版）
 
-**節點埠區（規劃）**：Capture `10010…`、Route `20010…`、Engine `30010…`、Console `40010…`。Route 資料平面預設使用 `20020`（SRTLA 入）、`20021`（內部 SRT）、`20030`（對 Engine SRT 出）；可經環境變數覆寫。
+**節點埠區（規劃）**：Capture `10010…`、Route `20010…`、Engine `30010…`、Console `40010…`。
+
+## 認證遷移策略（JWT/Bearer）
+
+目前倉庫既有功能仍含 `X-VBS-Key`；依 `.cursorrules` 目標改為 JWT/Bearer，採三階段遷移：
+
+| 階段 | 時程 | 允許 Header | 說明 |
+| --- | --- | --- | --- |
+| Phase 0（現在） | 立即 | `X-VBS-Key` + `Authorization: Bearer` | 雙軌相容，所有新 API 必須優先支援 Bearer。 |
+| Phase 1（切換） | 下一個 minor 版 | `Authorization: Bearer` 為預設、`X-VBS-Key` 僅 Legacy | 文件與 Console 介面預設顯示 Bearer；Legacy 需明確標註。 |
+| Phase 2（退場） | 下下個 minor 版 | `Authorization: Bearer` | 移除 `X-VBS-Key` 驗證路徑與環境變數依賴。 |
+
+- JWT 規格與授權矩陣：`docs/security/jwt-migration.md`。
+- 本文件中的服務表已新增 `Auth Mode` 欄位，便於追蹤退場節點。
+
+---
+
+## VBS-Route（`apps/route`）
 
 ### 標準環境變數（Route 行程）
 
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
 | `VBS_SRT_PASSPHRASE` | 是 | 全系統 SRT AES-256 密鑰，長度 10–64 字元。 |
-| `VBS_CONSOLE_BASE_URL` | 是 | Console 控制平面 HTTPS **原點**（例 `https://api.example.com`，建議不含路徑前綴）；若 Hub 在子路徑，請改以 `VBS_ROUTE_TELEMETRY_WS_PATH` 指定完整路徑。 |
-| `VBS_API_KEY` | 是 | 與 Console 約定之 API Key；WSS 與 REST 以標頭 `X-VBS-Key` 傳送。 |
+| `VBS_CONSOLE_BASE_URL` | 是 | Console 控制平面 HTTPS 原點（例 `https://api.example.com`）。 |
+| `VBS_API_KEY` | 是（Phase 0/1） | Legacy 認證用，Header `X-VBS-Key`。Phase 2 移除。 |
 | `VBS_NODE_ID` | 否 | 預設 `vbs-route-01`。 |
-| `VBS_ROUTE_TELEMETRY_WS_PATH` | 否 | 預設 `/vbs/telemetry/ws`（相對於 Console 主機）。 |
+| `VBS_ROUTE_TELEMETRY_WS_PATH` | 否 | 預設 `/vbs/telemetry/ws`。 |
 | `VBS_METRICS_INTERVAL` | 否 | 預設 `1000ms`（1Hz）。 |
-| `VBS_ROUTE_CONTROL_BIND` | 否 | 未設定時預設 `:20080`；設為空字串可關閉 HTTP 控制面。 |
-| `VBS_ROUTE_STALL_INGEST_SECONDS` | 否 | 預設 `5`；`0` 表示停用 ingest 停滯自癒。 |
-| `VBS_ROUTE_STALL_TRAFFIC_MBPS` | 否 | 判定「曾有顯著流量」之 Mbps 下限，預設 `0.5`。 |
-| `VBS_ROUTE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY` | 否 | 設為 `1` 或 `true` 僅供測試環境略過 TLS 校驗。 |
-| `VBS_ROUTE_MTU_IFACE` / `VBS_ROUTE_MTU` | 否 | 若設定介面名，嘗試 `ip link set dev <iface> mtu <mtu>`（預設 MTU `1400`）。 |
+| `VBS_ROUTE_CONTROL_BIND` | 否 | 預設 `:20080`；空字串關閉控制面。 |
 
 ### v1.2 合規對照（`apps/route`）
 
 | 規範項目 | 狀態 |
 | :--- | :--- |
-| 公網 SRT、Passphrase 環境注入、長度 10–64 | 已實作 |
-| 遙測 1Hz、單筆 JSON ≤255 bytes、WSS 上報、`X-VBS-Key` | 已實作（上報為非阻塞 goroutine） |
-| ingest 停滯自癒（曾有流量後連續歸零達閾值秒數） | 已實作，可關閉 |
+| 公網 SRT + AES-256 + passphrase 注入 | 已實作 |
+| 1Hz 遙測、單筆 JSON ≤255 bytes、WSS 上報 | 已實作 |
+| ingest 停滯自癒、指數退避重啟 | 已實作 |
 | `sysctl` rmem/wmem ≥16MB、可選 MTU | 已實作 |
-| 控制面 HTTP：`/healthz`、`/api/v1/route/buffer`（需 `X-VBS-Key`） | 已實作 |
-| Chrony/NTP、Cloudflare Tunnel | 主機／Console 側部署，非 Route 行程內 |
-| `/packages/shared` 共用 Schema | 尚未建立（後續與其他節點一併導入） |
+| `/packages/shared` 共用 schema | 已建立草案（`packages/shared/schemas`） |
 
-### CI/CD 與容器映像（對應 .cursorrules §7.1–§7.4）
+### 服務表（Route）
 
-- **Workflow**：`.github/workflows/vbs-route-publish.yml`
-- **正式發布線（唯一部署映像來源）**：
-  - **Merge / push 至 `main`**（且變更路徑含 `apps/route/**` 或 `go.mod` / `go.sum` 等）：推送 **`latest`** 與 **`sha-<短提交>`** 至 GHCR（§7.4「Merge to Main」）。
-  - **推送標籤 `v*`**（例 `v1.2.0`）：僅當該標籤所指提交 **屬於 `origin/main` 歷程** 時才建置並推送語意化版本標籤（§7.3、§7.4「Tag Create」）；否則 workflow 失敗，不發布映像。
-- **不觸發**：功能分支 **`feature/*`**、**`fix/*`** 等之 push **不會**執行本 workflow（§7.4：該類 push 僅應跑 Lint／測試／受影響模組編譯，由其他 workflow 負責）。
-- **Registry**：`ghcr.io`。映像名稱 **`ghcr.io/<owner小寫>/<repo小寫>/vbs-route`**（例：`ghcr.io/vbs-tg/virtual-broadcasting-services/vbs-route`）。
-- **機器上測試**：`docker login ghcr.io` 後 `docker pull .../vbs-route:latest`（或對應 **`v*`** 建置之版本標籤）。
-
-### 服務表
-
-| Service / Port | Protocol | Endpoint / Topic | `X-VBS-Key` | Node Context |
+| Service / Port | Protocol | Endpoint / Topic | Auth Mode | Node Context |
 | --- | --- | --- | --- | --- |
-| Route-SRTLA-Ingest / 20020 | UDP/SRTLA | Listener | —（媒體層 passphrase） | Capture → Route |
-| Route-SRT-Internal / 20021 | UDP/SRT | 本機 127.0.0.1 | — | Route 內部 |
-| Route-SRT-Out / 20030 | UDP/SRT | `srt://<DNS 或域名>:20030` Listener | —（媒體層 passphrase） | Route → Engine |
-| Route-Telemetry | WSS | 由 `VBS_CONSOLE_BASE_URL` + `VBS_ROUTE_TELEMETRY_WS_PATH` 衍生之 `wss://…` | **是** | Route → Console Hub |
-| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | 除 `/healthz` 外 **是** | Console / 維運 → Route |
+| Route-SRTLA-Ingest / 20020 | UDP/SRTLA | Listener | 媒體層 passphrase | Capture → Route |
+| Route-SRT-Internal / 20021 | UDP/SRT | `127.0.0.1` | 無（內部） | Route 內部 |
+| Route-SRT-Out / 20030 | UDP/SRT | `srt://<dns>:20030` Listener | 媒體層 passphrase | Route → Engine |
+| Route-Telemetry | WSS | `wss://<console>/vbs/telemetry/ws` | Phase 0/1：Bearer 或 `X-VBS-Key`；Phase 2：Bearer | Route → Console |
+| Route-Control-HTTP / 20080 | HTTP | `/healthz`、`/api/v1/route/buffer` | `/healthz` 無；其餘同上 | Console / 維運 → Route |
 
-### Route-Telemetry Payload
+### Route-Telemetry Payload（暫行）
 
 ```json
 {
@@ -63,66 +64,87 @@
 }
 ```
 
-### Route-Control：`POST /api/v1/route/buffer`
-
-**Headers**：`X-VBS-Key: <VBS_API_KEY>`，`Content-Type: application/json`
-
-```json
-{
-  "latency_ms": 2000,
-  "loss_max_ttl": 40
-}
-```
-
-可僅送需要變更的欄位；成功後 Route 會重啟媒體管線以套用新參數。
-
 ---
 
 ## VBS-Engine（`apps/engine`）
 
-基於 [BBC Brave](https://github.com/bbc/brave)（GStreamer）：**2 路 SRT（`uri` 入）**、左右分割 **mixer**、**WebRTC** 監看（Brave 內建網頁/API，**非**標準 WHEP；標準 WHEP 可後續再換）、**TCP MPEG** 接 **ffmpeg** 再以 **SRT Caller** 輸出 **PGM**。  
-**WSS 遙測**：本階段未實作，預留後續與 Route 一致之上報。
+基於 BBC Brave（GStreamer）：2 路 SRT 輸入、mixer 合成、WebRTC 監看、PGM 以 SRT 輸出。
 
-### 環境變數（Engine 容器）
+### Engine 監看信令：現況 vs 目標
+
+| 項目 | 現況（已上線） | 目標（規範） |
+| --- | --- | --- |
+| 信令入口 | Brave HTTP/Web UI（`/`、`/api/*`） | WHEP HTTP（`/whep`） |
+| 對外埠口 | `5000/tcp` | 可沿用 `5000/tcp` 或獨立 WHEP 埠 |
+| Tunnel 用途 | 只代理 HTTP/WebSocket 信令 | 同左 |
+| 媒體路徑 | WebRTC ICE/UDP 直連（非 Tunnel 搬運） | 同左 |
+| STUN/TURN | STUN 可用（`VBS_ENGINE_STUN_SERVER`） | 補齊 TURN 以提高對稱 NAT 成功率 |
+
+### 環境變數（Engine）
 
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
-| `VBS_ENGINE_SRT_INPUT_1_URI` | 是 | 第一路 SRT Caller URI（例 `srt://route.example.com:20030?mode=caller&latency=2000&passphrase=...&pbkeylen=32`） |
-| `VBS_ENGINE_SRT_INPUT_2_URI` | 是 | 第二路（測試可與第一路相同 URI 複製畫面） |
-| `VBS_ENGINE_PGM_SRT_URI` | 是 | PGM 輸出之 SRT Caller 完整 URI（ffmpeg 以 mpegts 送出） |
-| `VBS_ENGINE_MIXER_WIDTH` | 否 | 預設 `854`（約 480p 16:9 寬） |
-| `VBS_ENGINE_MIXER_HEIGHT` | 否 | 預設 `480` |
-| `VBS_ENGINE_PGM_TCP_PORT` | 否 | Brave 內部 TCP 伺服器埠，預設 `30090`（僅本機環，`ffmpeg` 連線用） |
-| `PORT` / `VBS_ENGINE_API_PORT` | 否 | Brave REST/Web 預設 `5000` |
-| `VBS_ENGINE_STUN_SERVER` | 否 | WebRTC 用，預設 `stun.l.google.com:19302` |
+| `VBS_ENGINE_SRT_INPUT_1_URI` | 是 | 第一路 SRT Caller URI。 |
+| `VBS_ENGINE_SRT_INPUT_2_URI` | 是 | 第二路 SRT Caller URI。 |
+| `VBS_ENGINE_PGM_SRT_URI` | 是 | PGM 輸出 SRT Caller URI。 |
+| `PORT` / `VBS_ENGINE_API_PORT` | 否 | Brave HTTP / 信令埠，預設 `5000`。 |
+| `VBS_ENGINE_API_HOST` | 否 | Brave 綁定位址，預設 `0.0.0.0`。 |
+| `VBS_ENGINE_STUN_SERVER` | 否 | STUN（亦寫入 `STUN_SERVER`），預設 `stun.l.google.com:19302`。 |
+| `VBS_ENGINE_TURN_SERVER` | 否 | TURN（Brave 格式 `user:pass@host:port`；亦寫入 `TURN_SERVER`）。 |
+| `VBS_ENGINE_REQUIRE_NVIDIA` | 否 | 預設 `1`：啟動前必須 `nvidia-smi` 成功，設 `0` 僅供無 GPU 除錯。 |
+| `VBS_ENGINE_REQUIRE_GST_NVH265DEC` | 否 | 預設 `0`；設 `1` 時強制 `gst-inspect nvh265dec` 存在。 |
+| `VBS_ENGINE_MTU_IFACE` / `VBS_ENGINE_MTU` | 否 | 若兩者皆設定，啟動時嘗試 `ip link set dev <iface> mtu <mtu>`（建議 `1400`）。 |
+| `VBS_ENGINE_RESTART_INITIAL_SEC` | 否 | 管線崩潰後首次重啟延遲秒數，預設 `1`。 |
+| `VBS_ENGINE_RESTART_BACKOFF_MAX_SEC` | 否 | 指數退避上限秒數，預設 `30`。 |
+| `VBS_CONSOLE_BASE_URL` | 否 | 若設定且 `VBS_ENGINE_TELEMETRY_ENABLED` 非 `0`，啟動 1Hz WSS 遙測。 |
+| `VBS_ENGINE_TELEMETRY_WS_PATH` | 否 | 遙測 WebSocket 路徑，預設 `/vbs/telemetry/ws`（相對 Console 主機）。 |
+| `VBS_ENGINE_TELEMETRY_ENABLED` | 否 | 預設 `1`；設 `0` 關閉遙測子進程。 |
+| `VBS_NODE_ID` | 否 | 遙測 `node_id`，預設 `vbs-engine`。 |
+| `VBS_METRICS_INTERVAL` | 否 | 遙測間隔，預設 `1000ms`（1Hz）。 |
+| `VBS_API_KEY` | 否 | 遙測 Phase 0：Header `X-VBS-Key`（若未設定 `VBS_ENGINE_JWT`）。 |
+| `VBS_ENGINE_JWT` | 否 | 遙測 Phase 0：Header `Authorization: Bearer`（優先於 API Key）。 |
 
-### 埠（預設，Engine 埠區 `30010…`）
+### 埠（Engine）
 
 | 用途 | 預設 |
 | :--- | :--- |
-| Brave HTTP / WebRTC 信令與內建 UI | `5000` TCP（`network_mode: host` 時為主機 `5000`） |
-| 內部 PGM 橋接（ffmpeg→Brave TCP） | `30090` TCP（僅容器內，可不對外） |
+| Brave HTTP + WebRTC 信令 + UI | `5000` TCP（host network 下即主機 5000） |
+| 內部 PGM 橋接（ffmpeg→Brave） | `30090` TCP（內部） |
 
-### CI/CD
+### v1.2 合規對照（`apps/engine`）
 
-- Workflow：`.github/workflows/vbs-engine-publish.yml`
-- 映像：`ghcr.io/<owner小寫>/<repo小寫>/vbs-engine`
+| 規範項目 | 狀態 |
+| :--- | :--- |
+| NVIDIA fail-fast（`nvidia-smi`） | 已實作（`entrypoint.sh`） |
+| WebRTC STUN／TURN（Brave `webrtcbin`） | 已實作（環境變數＋`generate_brave_config.py`） |
+| 1Hz 遙測、payload 符合 `telemetry.v1.schema.json` | 已實作（可選，`engine_telemetry.py`） |
+| 管線自癒（指數退避重啟） | 已實作（Brave＋ffmpeg） |
+| 可選 MTU `1400` | 已實作（`VBS_ENGINE_MTU_*`） |
+| 解碼鏈 `nvh265dec`→`glupload`→`gles2` | 未強制（Brave 預設 pipeline；見 `schemas/engine-deployment.md`） |
+| Brave HTTP JWT 中介 | 未實作（建議 Nginx／Tunnel 邊界驗證） |
 
-### 部署
+### Cloudflare Tunnel 範本
 
-- `docker compose -f docker-compose.engine.yml --env-file .env.engine up --build`
-- 需 **NVIDIA Container Toolkit** 與主機驅動；映像基底為 `nvidia/cuda:12.2.0-runtime-ubuntu22.04`。
-- **SRT 輸入 URI**：請使用小寫 scheme，例如 `srt://...`。若使用 `SRT://...`（大寫），舊版映像可能仍走 `playbin3` 而觸發 GStreamer 錯誤；請 **重建映像**（含 `patch_brave_uri_playbin_for_srt` 之 **不分大小寫** 判斷）或改為小寫。
+- Engine（rtc 子網域）：`docs/deploy/cloudflared-rtc.example.yml`
+- Console/API（api 子網域）：`docs/deploy/cloudflared-api.example.yml`
+- 重要原則：Tunnel 只代理信令，WebRTC 媒體走 ICE/UDP 直連。
 
-### Nginx 反代（HTTPS / WebSocket）
+---
 
-- 範例設定：`apps/engine/deploy/nginx-vbs-engine.conf.example`（反代至 `127.0.0.1:5000`，含 `Upgrade` / `Connection`）。
-- 對外只開 **443**（及 **80** 若需導向 HTTPS）；**勿對外直連 5000**，或以防火牆限制。
-- **SRT（UDP）不經 Nginx**，仍依環境變數 URI 與網路防火牆。
+## 共用 Schema（單一真相）
 
-### 除錯（常見：`Unable to add element intervideosink`）
+- `packages/shared/schemas/telemetry.v1.schema.json`
+- `packages/shared/schemas/control.route-buffer.v1.schema.json`
+- `packages/shared/schemas/node-status.v1.schema.json`
 
-1. **確認已拉最新 `feature/engine` 並 `--no-cache` 重建**：`docker compose build --no-cache`。
-2. **確認容器內已套用 SRT→playbin**：`docker exec -it <容器名> grep -n is_srt /opt/brave/brave/inputs/uri.py`，應見 `lower().startswith('srt')`。
-3. **環境檔 URI**：`VBS_ENGINE_SRT_INPUT_*_URI` 建議 `srt://` 小寫開頭。
-4. **容器內 GStreamer**：`docker exec -it <容器名> gst-inspect-1.0 intervideosink | head`；`GST_DEBUG=3` 可暫時加在 `docker compose` 的 `environment` 以取得載入外掛日誌（除錯完刪除）。
+新增或修改跨節點封包時，必須先更新上述 schema，再更新各節點實作。
+
+---
+
+## CI/CD 與治理
+
+- 發布 workflow：
+  - `.github/workflows/vbs-route-publish.yml`
+  - `.github/workflows/vbs-engine-publish.yml`
+- 協定治理 workflow：`.github/workflows/protocol-governance.yml`
+  - 若 PR 變更 `protocol.md`，必須同步調整 `packages/shared/schemas/**`；反向亦同。

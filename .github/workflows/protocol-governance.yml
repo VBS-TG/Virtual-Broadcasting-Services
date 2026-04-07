@@ -1,0 +1,39 @@
+﻿name: Protocol Governance
+
+on:
+  pull_request:
+    paths:
+      - "protocol.md"
+      - "packages/shared/schemas/**"
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-schema-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate protocol/schema change coupling
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.sha }}"
+
+          protocol_changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- protocol.md | wc -l)
+          schema_changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- packages/shared/schemas | wc -l)
+
+          if [ "$protocol_changed" -gt 0 ] && [ "$schema_changed" -eq 0 ]; then
+            echo "::error::protocol.md 有變更，但 packages/shared/schemas 未同步更新。"
+            exit 1
+          fi
+
+          if [ "$schema_changed" -gt 0 ] && [ "$protocol_changed" -eq 0 ]; then
+            echo "::error::shared schema 有變更，但 protocol.md 未同步更新。"
+            exit 1
+          fi
+
+          echo "protocol/schema coupling check passed."
