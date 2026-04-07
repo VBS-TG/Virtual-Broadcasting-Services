@@ -31,3 +31,6 @@ venv/
 Thumbs.db
 *.swp
 *~
+
+# Local temp artifacts
+.tmp_ws/
