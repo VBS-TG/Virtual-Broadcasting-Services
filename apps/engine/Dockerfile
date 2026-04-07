@@ -39,9 +39,11 @@ RUN python3 -m venv --system-site-packages .venv \
          'sanic==19.3.1' \
          'uvloop>=0.21,<0.23' \
          'pillow>=9.5,<12' \
-         'psutil>=5.6,<6'
+         'psutil>=5.6,<6' \
+         'websockets>=12,<15'
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
+COPY apps/engine/scripts/engine_telemetry.py /opt/vbs-engine/scripts/engine_telemetry.py
 COPY apps/engine/scripts/entrypoint.sh /opt/vbs-engine/scripts/entrypoint.sh
 RUN chmod +x /opt/vbs-engine/scripts/entrypoint.sh
 

@@ -82,7 +82,7 @@
 ## VBS-Engine（`apps/engine`）
 
 基於 [BBC Brave](https://github.com/bbc/brave)（GStreamer）：**2 路 SRT（`uri` 入）**、左右分割 **mixer**、**WebRTC** 監看（Brave 內建網頁/API，**非**標準 WHEP；標準 WHEP 可後續再換）、**TCP MPEG** 接 **ffmpeg** 再以 **SRT Caller** 輸出 **PGM**。  
-**WSS 遙測**：本階段未實作，預留後續與 Route 一致之上報。
+**WSS 遙測**：已實作（1Hz，Bearer JWT，單筆 ≤255 bytes），可由 bootstrap token 自動換發短效權杖。
 
 ### 環境變數（Engine 容器）
 
@@ -96,6 +96,13 @@
 | `VBS_ENGINE_PGM_TCP_PORT` | 否 | Brave 內部 TCP 伺服器埠，預設 `30090`（僅本機環，`ffmpeg` 連線用） |
 | `PORT` / `VBS_ENGINE_API_PORT` | 否 | Brave REST/Web 預設 `5000` |
 | `VBS_ENGINE_STUN_SERVER` | 否 | WebRTC 用，預設 `stun.l.google.com:19302` |
+| `VBS_CONSOLE_BASE_URL` | 否 | 設定後啟用 Engine telemetry，以上報至 Console `wss://.../vbs/telemetry/ws`。 |
+| `VBS_ENGINE_JWT` | 否 | 可直接注入已簽發 Engine JWT。 |
+| `VBS_ENGINE_BOOTSTRAP_TOKEN` | 否 | 若未提供 `VBS_ENGINE_JWT`，Engine 以此 bootstrap token 自動向 Console 申請短效 JWT。 |
+| `VBS_ENGINE_TELEMETRY_ENABLED` | 否 | 預設 `1`；設 `0` 關閉 telemetry。 |
+| `VBS_ENGINE_TELEMETRY_WS_PATH` | 否 | 預設 `/vbs/telemetry/ws`。 |
+| `VBS_METRICS_INTERVAL_SEC` | 否 | 預設 `1` 秒（1Hz）。 |
+| `VBS_NODE_ID` | 否 | telemetry `node_id`，預設 `vbs-engine`。 |
 
 ### 埠（預設，Engine 埠區 `30010…`）
 

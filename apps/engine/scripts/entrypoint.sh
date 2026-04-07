@@ -50,5 +50,11 @@ ffmpeg -hide_banner -loglevel info \
   "${VBS_ENGINE_PGM_SRT_URI}" &
 FF_PID=$!
 
-wait "$BRAVE_PID" "$FF_PID"
+if [[ -n "${VBS_CONSOLE_BASE_URL:-}" && "${VBS_ENGINE_TELEMETRY_ENABLED:-1}" != "0" ]]; then
+  echo "[vbs-engine] 啟動 telemetry → Console…"
+  /opt/brave/.venv/bin/python /opt/vbs-engine/scripts/engine_telemetry.py &
+  TELEMETRY_PID=$!
+fi
+
+wait "$BRAVE_PID" "$FF_PID" "${TELEMETRY_PID:-}"
 
