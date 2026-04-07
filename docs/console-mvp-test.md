@@ -29,7 +29,7 @@ curl -sS http://127.0.0.1:4000/healthz
 ```bash
 curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/token \
   -H "Content-Type: application/json" \
-  -H "X-Console-Admin: dev-admin-token-change-me" \
+  -H "Authorization: Bearer dev-admin-token-change-me" \
   -d '{"node_id":"vbs-route-01","role":"route"}'
 ```
 
@@ -39,7 +39,7 @@ curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/token \
 
 ```powershell
 $tok = (Invoke-RestMethod -Method POST -Uri http://127.0.0.1:4000/api/v1/auth/token `
-  -Headers @{ "X-Console-Admin"="dev-admin-token-change-me" } `
+  -Headers @{ "Authorization"="Bearer dev-admin-token-change-me" } `
   -ContentType "application/json" `
   -Body '{"node_id":"vbs-route-01","role":"route"}').access_token
 ```
@@ -62,11 +62,11 @@ $tok = (Invoke-RestMethod -Method POST -Uri http://127.0.0.1:4000/api/v1/auth/to
 
 ## 5. 查詢最新快照
 
-需帶管理密鑰 **或** `role=admin` 的 JWT：
+需帶 `role=admin` 的 JWT，或啟動初期以管理密鑰作為 bootstrap Bearer：
 
 ```bash
 curl -sS http://127.0.0.1:4000/api/v1/telemetry/latest \
-  -H "X-Console-Admin: dev-admin-token-change-me"
+  -H "Authorization: Bearer dev-admin-token-change-me"
 ```
 
 預期：`latest` 物件內以 `node_id` 為鍵，含最近一次成功接收的欄位。

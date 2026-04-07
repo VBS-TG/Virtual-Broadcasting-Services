@@ -19,7 +19,10 @@ type Config struct {
 
 	// Console 控制平面（HTTPS 基底網址，用於衍生 WSS 遙測 URL）
 	ConsoleBaseURL string
-	APIKey         string
+	// RouteJWT 可直接注入已簽發 JWT；若未提供可改用 BootstrapToken 自動向 Console 申請。
+	RouteJWT string
+	// BootstrapToken 為 Console bootstrap/admin token，用於自動換取短效節點 JWT。
+	BootstrapToken string
 
 	// WSS 遙測路徑（相對於 Console 主機），預設見 Load。
 	TelemetryWSPath string
@@ -53,7 +56,9 @@ const (
 	envLogLevel      = "VBS_LOG_LEVEL"
 
 	envConsoleBaseURL = "VBS_CONSOLE_BASE_URL"
-	envAPIKey         = "VBS_API_KEY"
+	envRouteJWT       = "VBS_ROUTE_JWT"
+	envGlobalJWT      = "VBS_JWT"
+	envBootstrapToken = "VBS_ROUTE_BOOTSTRAP_TOKEN"
 	envTelemetryPath  = "VBS_ROUTE_TELEMETRY_WS_PATH"
 	envTLSInsecure    = "VBS_ROUTE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY"
 
@@ -80,7 +85,8 @@ func Load() Config {
 		LogLevel:      getenvOrDefault(envLogLevel, "info"),
 
 		ConsoleBaseURL: strings.TrimSpace(os.Getenv(envConsoleBaseURL)),
-		APIKey:         strings.TrimSpace(os.Getenv(envAPIKey)),
+		RouteJWT:       strings.TrimSpace(getenvFirstNonEmpty(envRouteJWT, envGlobalJWT)),
+		BootstrapToken: strings.TrimSpace(os.Getenv(envBootstrapToken)),
 		TelemetryWSPath: getenvOrDefault(envTelemetryPath, "/vbs/telemetry/ws"),
 	}
 
@@ -161,8 +167,8 @@ func (c Config) Validate() error {
 	if c.ConsoleBaseURL == "" {
 		return fmt.Errorf("VBS_CONSOLE_BASE_URL 為必填（Console 控制平面 HTTPS 基底）")
 	}
-	if c.APIKey == "" {
-		return fmt.Errorf("VBS_API_KEY 為必填（請求標頭 X-VBS-Key）")
+	if c.RouteJWT == "" && c.BootstrapToken == "" {
+		return fmt.Errorf("VBS_ROUTE_JWT（或 VBS_JWT）與 VBS_ROUTE_BOOTSTRAP_TOKEN 至少需設定一項")
 	}
 	if c.SRTLAIngestPort <= 0 || c.SRTOutputPort <= 0 || c.InternalSRTPort <= 0 {
 		return fmt.Errorf("Route 埠號必須為正整數")
@@ -184,6 +190,15 @@ func getenvOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func getenvFirstNonEmpty(keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func getenvIntOrDefault(key string, def int) int {

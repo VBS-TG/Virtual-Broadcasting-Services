@@ -125,15 +125,20 @@ func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminAuthorized(r *http.Request) bool {
-	if constantTimeEqual(strings.TrimSpace(r.Header.Get("X-Console-Admin")), s.cfg.AdminToken) {
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
+	if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
+		return false
+	}
+	raw := strings.TrimSpace(h[7:])
+	if constantTimeEqual(raw, s.cfg.AdminToken) {
+		// Bootstrap mode: allow Bearer <admin bootstrap token> to mint first admin JWT.
 		return true
 	}
-	h := r.Header.Get("Authorization")
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(h)), "bearer ") {
-		got := strings.TrimSpace(h[7:])
-		return constantTimeEqual(got, s.cfg.AdminToken)
+	claims, err := s.jwt.Parse(raw)
+	if err != nil {
+		return false
 	}
-	return false
+	return strings.EqualFold(strings.TrimSpace(claims.Role), "admin")
 }
 
 func constantTimeEqual(a, b string) bool {

@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"vbs/apps/route/internal/config"
 	"vbs/apps/route/internal/rtstate"
 )
 
-// Start 啟動 Route 控制面 HTTP 服務（健康檢查、SRT 緩衝參數熱更新）。非資料平面，須搭配防火牆與 X-VBS-Key。
+// Start 啟動 Route 控制面 HTTP 服務（健康檢查、SRT 緩衝參數熱更新）。非資料平面，須搭配防火牆與 Bearer JWT。
 func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restart chan<- struct{}, logger *log.Logger) {
 	if logger == nil {
 		logger = log.Default()
@@ -46,7 +47,7 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if r.Header.Get("X-VBS-Key") != cfg.APIKey {
+		if !authorizedBearer(r.Header.Get("Authorization"), cfg.RouteJWT, cfg.BootstrapToken) {
 			logger.Printf("[route][ctrl] 未授權的 API 請求 remote=%s path=%s", r.RemoteAddr, r.URL.Path)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -98,4 +99,21 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 		defer cancel()
 		_ = srv.Shutdown(shCtx)
 	}()
+}
+
+func authorizedBearer(headerValue string, acceptedTokens ...string) bool {
+	headerValue = strings.TrimSpace(headerValue)
+	if !strings.HasPrefix(strings.ToLower(headerValue), "bearer ") {
+		return false
+	}
+	received := strings.TrimSpace(headerValue[7:])
+	if received == "" {
+		return false
+	}
+	for _, tok := range acceptedTokens {
+		if received == strings.TrimSpace(tok) && tok != "" {
+			return true
+		}
+	}
+	return false
 }

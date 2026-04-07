@@ -5,7 +5,9 @@
 ## 前置條件
 
 - 已準備 **Console** 端可接受之 **HTTPS** 基底網址（`VBS_CONSOLE_BASE_URL`）及對應 **WSS** 遙測端點（見 `protocol.md`）。
-- 已產生 **`VBS_API_KEY`**（與 Console 後端約定，請求標頭 `X-VBS-Key`）。
+- 已設定 Route 認證方式：  
+  - 直接注入 **`VBS_ROUTE_JWT`**（或 `VBS_JWT`），或  
+  - 提供 **`VBS_ROUTE_BOOTSTRAP_TOKEN`** 讓 Route 啟動後自動向 Console 換取短效 JWT。
 - **`VBS_SRT_PASSPHRASE`** 長度 10–64 字元（全系統 SRT AES-256）。
 - 安全群組／防火牆已放行 Route 埠區 UDP（預設 `20020`、`20030` 等）及控制面 TCP（預設 `20080`，若啟用）。
 
@@ -17,18 +19,18 @@
 2. `docker login ghcr.io`（需可讀取該套件之權限）。
 3. 拉取映像（請將路徑換成你們實際的 owner/repo，小寫）：
    - `docker pull ghcr.io/vbs-tg/virtual-broadcasting-services/vbs-route:latest`
-4. 以 `docker run --network host -e VBS_CONSOLE_BASE_URL=... -e VBS_API_KEY=... -e VBS_SRT_PASSPHRASE=... ... ghcr.io/.../vbs-route:latest` 或自行撰寫 compose **image:** 欄位指向上述映像。
+4. 以 `docker run --network host -e VBS_CONSOLE_BASE_URL=... -e VBS_ROUTE_JWT=... -e VBS_SRT_PASSPHRASE=... ... ghcr.io/.../vbs-route:latest`（或改用 `VBS_ROUTE_BOOTSTRAP_TOKEN`）啟動，亦可自行撰寫 compose **image:** 欄位指向上述映像。
 
 ### 方式 B：於建置機本地 build
 
-1. 於專案根目錄設定環境變數（至少 `VBS_CONSOLE_BASE_URL`、`VBS_API_KEY`、`VBS_SRT_PASSPHRASE`）。
+1. 於專案根目錄設定環境變數（至少 `VBS_CONSOLE_BASE_URL`、`VBS_SRT_PASSPHRASE`，以及 `VBS_ROUTE_JWT` 或 `VBS_ROUTE_BOOTSTRAP_TOKEN`）。
 2. 執行：`docker compose -f docker-compose.route.yml up --build -d`
 3. 檢查日誌：應見 `[route] 啟動`、sysctl／可選 MTU、`[route][telemetry]` JSON，以及 WSS 上報成功或錯誤訊息。
 
 ## 健康檢查
 
 - `GET http://<主機>:20080/healthz`（無需 Key）應回 `{"status":"ok"}`。
-- 動態調整緩衝：`POST http://<主機>:20080/api/v1/route/buffer`，標頭 `X-VBS-Key`，JSON 見 `protocol.md`。
+- 動態調整緩衝：`POST http://<主機>:20080/api/v1/route/buffer`，標頭 `Authorization: Bearer <JWT 或 bootstrap token>`，JSON 見 `protocol.md`。
 
 ## 串流驗證
 

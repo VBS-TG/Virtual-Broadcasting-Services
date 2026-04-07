@@ -8,7 +8,8 @@
 | :--- | :--- | :--- |
 | `VBS_SRT_PASSPHRASE` | 是 | 全系統 SRT AES-256 密鑰，長度 10–64 字元。 |
 | `VBS_CONSOLE_BASE_URL` | 是 | Console 控制平面 HTTPS **原點**（例 `https://api.example.com`，建議不含路徑前綴）；若 Hub 在子路徑，請改以 `VBS_ROUTE_TELEMETRY_WS_PATH` 指定完整路徑。 |
-| `VBS_API_KEY` | 是 | 與 Console 約定之 API Key；WSS 與 REST 以標頭 `X-VBS-Key` 傳送。 |
+| `VBS_ROUTE_JWT`（或 `VBS_JWT`） | 否 | 若已由 Console 簽發，可直接注入 Route Bearer JWT。 |
+| `VBS_ROUTE_BOOTSTRAP_TOKEN` | 否 | 若未提供 `VBS_ROUTE_JWT`，Route 啟動時以 bootstrap Bearer token 自動向 Console 申請短效 JWT。 |
 | `VBS_NODE_ID` | 否 | 預設 `vbs-route-01`。 |
 | `VBS_ROUTE_TELEMETRY_WS_PATH` | 否 | 預設 `/vbs/telemetry/ws`（相對於 Console 主機）。 |
 | `VBS_METRICS_INTERVAL` | 否 | 預設 `1000ms`（1Hz）。 |
@@ -23,10 +24,10 @@
 | 規範項目 | 狀態 |
 | :--- | :--- |
 | 公網 SRT、Passphrase 環境注入、長度 10–64 | 已實作 |
-| 遙測 1Hz、單筆 JSON ≤255 bytes、WSS 上報、`X-VBS-Key` | 已實作（上報為非阻塞 goroutine） |
+| 遙測 1Hz、單筆 JSON ≤255 bytes、WSS 上報（Bearer JWT） | 已實作（上報為非阻塞 goroutine） |
 | ingest 停滯自癒（曾有流量後連續歸零達閾值秒數） | 已實作，可關閉 |
 | `sysctl` rmem/wmem ≥16MB、可選 MTU | 已實作 |
-| 控制面 HTTP：`/healthz`、`/api/v1/route/buffer`（需 `X-VBS-Key`） | 已實作 |
+| 控制面 HTTP：`/healthz`、`/api/v1/route/buffer`（需 Bearer） | 已實作 |
 | Chrony/NTP、Cloudflare Tunnel | 主機／Console 側部署，非 Route 行程內 |
 | `/packages/shared` 共用 Schema | 尚未建立（後續與其他節點一併導入） |
 
@@ -42,13 +43,13 @@
 
 ### 服務表
 
-| Service / Port | Protocol | Endpoint / Topic | `X-VBS-Key` | Node Context |
+| Service / Port | Protocol | Endpoint / Topic | Auth Mode | Node Context |
 | --- | --- | --- | --- | --- |
 | Route-SRTLA-Ingest / 20020 | UDP/SRTLA | Listener | —（媒體層 passphrase） | Capture → Route |
 | Route-SRT-Internal / 20021 | UDP/SRT | 本機 127.0.0.1 | — | Route 內部 |
 | Route-SRT-Out / 20030 | UDP/SRT | `srt://<DNS 或域名>:20030` Listener | —（媒體層 passphrase） | Route → Engine |
-| Route-Telemetry | WSS | 由 `VBS_CONSOLE_BASE_URL` + `VBS_ROUTE_TELEMETRY_WS_PATH` 衍生之 `wss://…` | **是** | Route → Console Hub |
-| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | 除 `/healthz` 外 **是** | Console / 維運 → Route |
+| Route-Telemetry | WSS | 由 `VBS_CONSOLE_BASE_URL` + `VBS_ROUTE_TELEMETRY_WS_PATH` 衍生之 `wss://…` | `Authorization: Bearer <JWT>` | Route → Console Hub |
+| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | `/healthz` 無；其餘 `Authorization: Bearer <JWT>` | Console / 維運 → Route |
 
 ### Route-Telemetry Payload
 
@@ -65,7 +66,7 @@
 
 ### Route-Control：`POST /api/v1/route/buffer`
 
-**Headers**：`X-VBS-Key: <VBS_API_KEY>`，`Content-Type: application/json`
+**Headers**：`Authorization: Bearer <JWT>`，`Content-Type: application/json`
 
 ```json
 {
@@ -127,7 +128,7 @@ Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 *
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
 | `VBS_CONSOLE_JWT_SECRET` | 是 | HS256 簽章密鑰；Route/Engine 所持 JWT 須由此密鑰簽出。 |
-| `VBS_CONSOLE_ADMIN_TOKEN` | 強烈建議 | 發放 JWT（`POST /api/v1/auth/token`）與查詢 `GET /api/v1/telemetry/latest`（`X-Console-Admin` 或 Bearer 等值）之共享密鑰；未設定時發證端點回 503。 |
+| `VBS_CONSOLE_ADMIN_TOKEN` | 強烈建議 | 啟動初期 bootstrap 管理密鑰；以 `Authorization: Bearer <token>` 呼叫 `POST /api/v1/auth/token` 取得 admin JWT。未設定時發證端點回 503。 |
 | `VBS_CONSOLE_HTTP_BIND` | 否 | 預設 `:4000`。 |
 | `VBS_CONSOLE_JWT_TTL_SEC` | 否 | 簽發 token 有效期（秒），預設 `3600`，最小 `60`。 |
 | `VBS_CONSOLE_TELEMETRY_MAX_BYTES` | 否 | 單筆 WS 訊息上限，預設 `255`（與 1Hz／≤255B 規範一致）。 |
@@ -137,9 +138,9 @@ Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 *
 | Service / Port | Protocol | Endpoint | Auth Mode | Node Context |
 | --- | --- | --- | --- | --- |
 | Console-HTTP / 4000 | HTTP | `GET /healthz` | 無 | 健康檢查 |
-| Console-HTTP / 4000 | HTTP | `POST /api/v1/auth/token` | `X-Console-Admin` 或 `Authorization: Bearer <admin token>` | 簽發節點 JWT（claims：`sub`=node_id、`role`、`exp`） |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/auth/token` | `Authorization: Bearer <admin bootstrap token 或 admin JWT>` | 簽發節點 JWT（claims：`node_id`、`role`、`exp`） |
 | Console-Telemetry | WS/WSS | `GET /vbs/telemetry/ws`（Upgrade） | `Authorization: Bearer <JWT>`；`role` 須為 `capture`／`route`／`engine`／`console` | Route/Engine/Capture → Console |
-| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `X-Console-Admin` 或 Bearer admin JWT | 讀取每節點最近一次遙測（內存） |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <admin bootstrap token 或 admin JWT>` | 讀取每節點最近一次遙測（內存） |
 
 ### JWT（MVP-A）
 

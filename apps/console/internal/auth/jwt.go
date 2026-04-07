@@ -19,6 +19,7 @@ var TelemetrySenderRoles = map[string]struct{}{
 
 // Claims is the JWT payload for node tokens.
 type Claims struct {
+	NodeID string `json:"node_id"`
 	Role string `json:"role"`
 	jwt.RegisteredClaims
 }
@@ -47,6 +48,7 @@ func (m *Manager) Mint(nodeID, role string) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(m.ttl)
 	claims := Claims{
+		NodeID: nodeID,
 		Role: role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   nodeID,
@@ -89,6 +91,9 @@ func (m *Manager) Parse(raw string) (*Claims, error) {
 	}
 	if claims.Subject == "" {
 		return nil, fmt.Errorf("missing sub claim")
+	}
+	if claims.NodeID == "" {
+		claims.NodeID = claims.Subject
 	}
 	return &claims, nil
 }
