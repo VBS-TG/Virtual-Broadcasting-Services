@@ -3,7 +3,9 @@ package httpserver
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log"
@@ -13,6 +15,7 @@ import (
 
 	"vbs/apps/console/internal/auth"
 	"vbs/apps/console/internal/config"
+	"vbs/apps/console/internal/nodes"
 	"vbs/apps/console/internal/telemetry"
 
 	"github.com/gorilla/websocket"
@@ -24,6 +27,7 @@ const maxTokenBodyBytes = 4096
 type Server struct {
 	cfg    *config.Config
 	jwt    *auth.Manager
+	nodes  *nodes.Registry
 	hub    *telemetry.Hub
 	http   *http.Server
 	mux    *http.ServeMux
@@ -45,6 +49,12 @@ func New(cfg *config.Config) *Server {
 			},
 		},
 	}
+	reg, err := nodes.ParseRegistry(cfg.NodeCredentialsRaw)
+	if err != nil {
+		log.Printf("node registry parse warning: %v", err)
+		reg = &nodes.Registry{}
+	}
+	s.nodes = reg
 	s.routes()
 	s.http = &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -57,8 +67,11 @@ func New(cfg *config.Config) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("POST /api/v1/auth/token", s.handleAuthToken)
+	s.mux.HandleFunc("POST /api/v1/auth/register", s.handleNodeRegister)
+	s.mux.HandleFunc("POST /api/v1/auth/refresh", s.handleAuthRefresh)
 	s.mux.HandleFunc("GET /vbs/telemetry/ws", s.handleTelemetryWS)
 	s.mux.HandleFunc("GET /api/v1/telemetry/latest", s.handleTelemetryLatest)
+	s.mux.HandleFunc("POST /api/v1/stream/session-key", s.handleSessionKey)
 }
 
 // ListenAndServe starts the HTTP server.
@@ -87,6 +100,12 @@ type tokenResponse struct {
 	TokenType   string `json:"token_type"`
 	ExpiresIn   int64  `json:"expires_in"`
 	ExpiresAt   int64  `json:"expires_at_unix"`
+}
+
+type registerRequest struct {
+	NodeID       string `json:"node_id"`
+	Role         string `json:"role"`
+	DeviceSecret string `json:"device_secret"`
 }
 
 func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +140,74 @@ func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 		TokenType:   "Bearer",
 		ExpiresIn:   int64(s.cfg.JWTTTL.Seconds()),
 		ExpiresAt:   exp.Unix(),
+	})
+}
+
+func (s *Server) handleNodeRegister(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
+	if err != nil {
+		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
+		return
+	}
+	var req registerRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	if !s.nodes.Check(req.NodeID, req.Role, req.DeviceSecret) {
+		http.Error(w, `{"error":"unauthorized device"}`, http.StatusUnauthorized)
+		return
+	}
+	token, exp, err := s.jwt.Mint(req.NodeID, req.Role)
+	if err != nil {
+		http.Error(w, `{"error":"mint failed"}`, http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(tokenResponse{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		ExpiresIn:   int64(s.cfg.JWTTTL.Seconds()),
+		ExpiresAt:   exp.Unix(),
+	})
+}
+
+func (s *Server) handleAuthRefresh(w http.ResponseWriter, r *http.Request) {
+	claims, err := s.jwt.ParseBearer(r.Header.Get("Authorization"))
+	if err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	token, exp, err := s.jwt.Mint(claims.NodeID, claims.Role)
+	if err != nil {
+		http.Error(w, `{"error":"refresh failed"}`, http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(tokenResponse{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		ExpiresIn:   int64(s.cfg.JWTTTL.Seconds()),
+		ExpiresAt:   exp.Unix(),
+	})
+}
+
+func (s *Server) handleSessionKey(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	buf := make([]byte, 24) // 32 chars base64url-ish
+	if _, err := rand.Read(buf); err != nil {
+		http.Error(w, `{"error":"keygen failed"}`, http.StatusInternalServerError)
+		return
+	}
+	key := base64.RawURLEncoding.EncodeToString(buf)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"passphrase": key,
+		"algorithm":  "SRT-AES-256",
+		"expires_in": "session",
 	})
 }
 

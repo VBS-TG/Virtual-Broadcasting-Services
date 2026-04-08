@@ -54,14 +54,15 @@ def _ws_url(base_url: str, path: str) -> str:
 def _http_post_json(url: str, body: dict, bearer: str, timeout_sec: int = 8) -> dict:
     req = urllib.request.Request(url, method="POST")
     req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {bearer}")
+    if bearer:
+        req.add_header("Authorization", f"Bearer {bearer}")
     payload = json.dumps(body).encode("utf-8")
     with urllib.request.urlopen(req, payload, timeout=timeout_sec) as resp:
         raw = resp.read()
     return json.loads(raw.decode("utf-8"))
 
 
-def _issue_token(base_url: str, bootstrap: str, node_id: str) -> Tuple[str, int]:
+def _issue_token_with_bootstrap(base_url: str, bootstrap: str, node_id: str) -> Tuple[str, int]:
     endpoint = urljoin(base_url.rstrip("/") + "/", "api/v1/auth/token")
     out = _http_post_json(endpoint, {"node_id": node_id, "role": "engine"}, bootstrap)
     token = out.get("access_token", "")
@@ -71,6 +72,30 @@ def _issue_token(base_url: str, bootstrap: str, node_id: str) -> Tuple[str, int]
     if not token:
         raise RuntimeError("empty access_token from console")
     return token, exp
+
+
+def _register_device(base_url: str, node_id: str, device_secret: str) -> Tuple[str, int]:
+    endpoint = urljoin(base_url.rstrip("/") + "/", "api/v1/auth/register")
+    out = _http_post_json(endpoint, {"node_id": node_id, "role": "engine", "device_secret": device_secret}, "")
+    token = out.get("access_token", "")
+    exp = int(out.get("expires_at_unix", 0))
+    if not exp and token:
+        exp = _jwt_exp_unverified(token)
+    if not token:
+        raise RuntimeError("empty access_token from register")
+    return token, exp
+
+
+def _refresh_token(base_url: str, token: str) -> Tuple[str, int]:
+    endpoint = urljoin(base_url.rstrip("/") + "/", "api/v1/auth/refresh")
+    out = _http_post_json(endpoint, {}, token)
+    new_token = out.get("access_token", "")
+    exp = int(out.get("expires_at_unix", 0))
+    if not exp and new_token:
+        exp = _jwt_exp_unverified(new_token)
+    if not new_token:
+        raise RuntimeError("empty access_token from refresh")
+    return new_token, exp
 
 
 async def main() -> None:
@@ -93,6 +118,8 @@ async def main() -> None:
     if auth.token:
         auth.exp_unix = _jwt_exp_unverified(auth.token)
     bootstrap = _env("VBS_ENGINE_BOOTSTRAP_TOKEN")
+    device_id = _env("VBS_ENGINE_DEVICE_ID", node_id)
+    device_secret = _env("VBS_ENGINE_DEVICE_SECRET")
 
     ssl_ctx: Optional[ssl.SSLContext] = None
     if ws_url.startswith("wss://"):
@@ -106,9 +133,19 @@ async def main() -> None:
         try:
             now = int(time.time())
             if (not auth.token) or (auth.exp_unix and auth.exp_unix - now <= 300):
-                if not bootstrap:
-                    raise RuntimeError("token missing/expiring and VBS_ENGINE_BOOTSTRAP_TOKEN not set")
-                auth.token, auth.exp_unix = _issue_token(base_url, bootstrap, node_id)
+                if auth.token:
+                    try:
+                        auth.token, auth.exp_unix = _refresh_token(base_url, auth.token)
+                    except Exception:
+                        auth.token = ""
+                if not auth.token and device_secret:
+                    auth.token, auth.exp_unix = _register_device(base_url, device_id, device_secret)
+                if not auth.token and bootstrap:
+                    auth.token, auth.exp_unix = _issue_token_with_bootstrap(base_url, bootstrap, node_id)
+                if not auth.token:
+                    raise RuntimeError(
+                        "token missing/expiring and no auth source set (need VBS_ENGINE_DEVICE_SECRET or VBS_ENGINE_BOOTSTRAP_TOKEN)"
+                    )
 
             metrics = {
                 "cpu_pct": round(psutil.cpu_percent(interval=None), 2),

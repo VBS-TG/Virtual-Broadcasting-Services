@@ -5,9 +5,10 @@
 ## 前置條件
 
 - 已準備 **Console** 端可接受之 **HTTPS** 基底網址（`VBS_CONSOLE_BASE_URL`）及對應 **WSS** 遙測端點（見 `protocol.md`）。
-- 已設定 Route 認證方式：  
+- 已設定 Route 認證方式（擇一）：  
+  - **`VBS_ROUTE_DEVICE_ID` + `VBS_ROUTE_DEVICE_SECRET`**（正式版推薦，透過 `/api/v1/auth/register` 自動換發/續約 JWT），或  
   - 直接注入 **`VBS_ROUTE_JWT`**（或 `VBS_JWT`），或  
-  - 提供 **`VBS_ROUTE_BOOTSTRAP_TOKEN`** 讓 Route 啟動後自動向 Console 換取短效 JWT。
+  - 提供 **`VBS_ROUTE_BOOTSTRAP_TOKEN`**（舊版相容）。
 - **`VBS_SRT_PASSPHRASE`** 長度 10–64 字元（全系統 SRT AES-256）。
 - 安全群組／防火牆已放行 Route 埠區 UDP（預設 `20020`、`20030` 等）及控制面 TCP（預設 `20080`，若啟用）。
 

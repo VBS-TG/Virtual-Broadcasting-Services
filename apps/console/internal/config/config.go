@@ -21,6 +21,7 @@ type Config struct {
 	JWTTTL       time.Duration
 	AdminToken   string
 	TelemetryMax int // max raw WS message size (bytes), default 255
+	NodeCredentialsRaw string
 }
 
 // Load reads configuration from environment variables.
@@ -56,5 +57,6 @@ func Load() (*Config, error) {
 		JWTTTL:       time.Duration(ttlSec) * time.Second,
 		AdminToken:   admin,
 		TelemetryMax: maxPayload,
+		NodeCredentialsRaw: strings.TrimSpace(os.Getenv("VBS_CONSOLE_NODE_CREDENTIALS")),
 	}, nil
 }

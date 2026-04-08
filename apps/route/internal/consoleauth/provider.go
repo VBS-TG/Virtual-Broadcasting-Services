@@ -56,11 +56,24 @@ func (p *Provider) BearerToken(ctx context.Context, nodeID string) (string, erro
 			}
 		}
 	}
-	if p.cfg.BootstrapToken == "" {
-		if p.cached != "" {
+	if p.cached != "" {
+		// Try refresh when token exists but nearing expiry.
+		if t, exp, err := p.refreshToken(ctx, p.cached); err == nil {
+			p.cached, p.expires = t, exp
 			return p.cached, nil
 		}
-		return "", fmt.Errorf("no route jwt and no bootstrap token")
+	}
+
+	if p.cfg.DeviceID != "" && p.cfg.DeviceSecret != "" {
+		token, exp, err := p.registerDevice(ctx)
+		if err == nil {
+			p.cached, p.expires = token, exp
+			return p.cached, nil
+		}
+	}
+
+	if p.cfg.BootstrapToken == "" {
+		return "", fmt.Errorf("no route jwt and no device credential/bootstrap token")
 	}
 
 	token, exp, err := p.fetchToken(ctx, nodeID)
@@ -93,6 +106,69 @@ func (p *Provider) fetchToken(ctx context.Context, nodeID string) (string, time.
 	if resp.StatusCode != http.StatusOK {
 		return "", time.Time{}, fmt.Errorf("token endpoint status=%d", resp.StatusCode)
 	}
+	var out struct {
+		AccessToken string `json:"access_token"`
+		ExpiresAt   int64  `json:"expires_at_unix"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", time.Time{}, err
+	}
+	if out.AccessToken == "" {
+		return "", time.Time{}, fmt.Errorf("empty access_token")
+	}
+	exp := time.Unix(out.ExpiresAt, 0)
+	if out.ExpiresAt == 0 {
+		if t, ok := jwtExp(out.AccessToken); ok {
+			exp = t
+		}
+	}
+	return out.AccessToken, exp, nil
+}
+
+func (p *Provider) registerDevice(ctx context.Context) (string, time.Time, error) {
+	endpoint := strings.TrimRight(p.cfg.ConsoleBaseURL, "/") + "/api/v1/auth/register"
+	body := map[string]string{
+		"node_id":       p.cfg.DeviceID,
+		"role":          "route",
+		"device_secret": p.cfg.DeviceSecret,
+	}
+	buf, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", time.Time{}, fmt.Errorf("register endpoint status=%d", resp.StatusCode)
+	}
+	return decodeTokenResponse(resp)
+}
+
+func (p *Provider) refreshToken(ctx context.Context, token string) (string, time.Time, error) {
+	endpoint := strings.TrimRight(p.cfg.ConsoleBaseURL, "/") + "/api/v1/auth/refresh"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", time.Time{}, fmt.Errorf("refresh endpoint status=%d", resp.StatusCode)
+	}
+	return decodeTokenResponse(resp)
+}
+
+func decodeTokenResponse(resp *http.Response) (string, time.Time, error) {
 	var out struct {
 		AccessToken string `json:"access_token"`
 		ExpiresAt   int64  `json:"expires_at_unix"`

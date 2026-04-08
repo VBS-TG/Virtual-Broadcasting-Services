@@ -15,3 +15,5 @@ services:
       VBS_CONSOLE_JWT_SECRET: ${VBS_CONSOLE_JWT_SECRET:-dev-console-jwt-secret-change-me}
       VBS_CONSOLE_ADMIN_TOKEN: ${VBS_CONSOLE_ADMIN_TOKEN:-dev-admin-token-change-me}
       VBS_CONSOLE_JWT_TTL_SEC: "3600"
+      # 節點註冊憑證（正式版）：格式 node_id:role:device_secret 以逗號分隔
+      VBS_CONSOLE_NODE_CREDENTIALS: ${VBS_CONSOLE_NODE_CREDENTIALS:-vbs-route-01:route:dev-route-secret,vbs-engine:engine:dev-engine-secret}

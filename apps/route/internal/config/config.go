@@ -21,8 +21,11 @@ type Config struct {
 	ConsoleBaseURL string
 	// RouteJWT 可直接注入已簽發 JWT；若未提供可改用 BootstrapToken 自動向 Console 申請。
 	RouteJWT string
-	// BootstrapToken 為 Console bootstrap/admin token，用於自動換取短效節點 JWT。
+	// BootstrapToken 為舊版相容用 token（可換取短效節點 JWT）。
 	BootstrapToken string
+	// Device bootstrap identity（正式版）
+	DeviceID     string
+	DeviceSecret string
 
 	// WSS 遙測路徑（相對於 Console 主機），預設見 Load。
 	TelemetryWSPath string
@@ -59,6 +62,8 @@ const (
 	envRouteJWT       = "VBS_ROUTE_JWT"
 	envGlobalJWT      = "VBS_JWT"
 	envBootstrapToken = "VBS_ROUTE_BOOTSTRAP_TOKEN"
+	envDeviceID       = "VBS_ROUTE_DEVICE_ID"
+	envDeviceSecret   = "VBS_ROUTE_DEVICE_SECRET"
 	envTelemetryPath  = "VBS_ROUTE_TELEMETRY_WS_PATH"
 	envTLSInsecure    = "VBS_ROUTE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY"
 
@@ -87,6 +92,8 @@ func Load() Config {
 		ConsoleBaseURL: strings.TrimSpace(os.Getenv(envConsoleBaseURL)),
 		RouteJWT:       strings.TrimSpace(getenvFirstNonEmpty(envRouteJWT, envGlobalJWT)),
 		BootstrapToken: strings.TrimSpace(os.Getenv(envBootstrapToken)),
+		DeviceID:       strings.TrimSpace(os.Getenv(envDeviceID)),
+		DeviceSecret:   strings.TrimSpace(os.Getenv(envDeviceSecret)),
 		TelemetryWSPath: getenvOrDefault(envTelemetryPath, "/vbs/telemetry/ws"),
 	}
 
@@ -167,8 +174,8 @@ func (c Config) Validate() error {
 	if c.ConsoleBaseURL == "" {
 		return fmt.Errorf("VBS_CONSOLE_BASE_URL 為必填（Console 控制平面 HTTPS 基底）")
 	}
-	if c.RouteJWT == "" && c.BootstrapToken == "" {
-		return fmt.Errorf("VBS_ROUTE_JWT（或 VBS_JWT）與 VBS_ROUTE_BOOTSTRAP_TOKEN 至少需設定一項")
+	if c.RouteJWT == "" && c.BootstrapToken == "" && (c.DeviceID == "" || c.DeviceSecret == "") {
+		return fmt.Errorf("需設定 VBS_ROUTE_JWT（或 VBS_JWT），或 VBS_ROUTE_DEVICE_ID+VBS_ROUTE_DEVICE_SECRET，或舊版 VBS_ROUTE_BOOTSTRAP_TOKEN")
 	}
 	if c.SRTLAIngestPort <= 0 || c.SRTOutputPort <= 0 || c.InternalSRTPort <= 0 {
 		return fmt.Errorf("Route 埠號必須為正整數")

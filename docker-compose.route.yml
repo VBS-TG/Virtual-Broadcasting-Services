@@ -12,6 +12,9 @@ services:
       - VBS_CONSOLE_BASE_URL=${VBS_CONSOLE_BASE_URL}
       # 方案 A：預先注入節點 JWT
       - VBS_ROUTE_JWT=${VBS_ROUTE_JWT}
+      # 方案 A2：正式版 device 身分註冊，自動換發/續約 JWT
+      - VBS_ROUTE_DEVICE_ID=${VBS_ROUTE_DEVICE_ID:-vbs-route-01}
+      - VBS_ROUTE_DEVICE_SECRET=${VBS_ROUTE_DEVICE_SECRET}
       # 方案 B：只給 bootstrap token，由 Route 自動向 Console 換短效 JWT
       - VBS_ROUTE_BOOTSTRAP_TOKEN=${VBS_ROUTE_BOOTSTRAP_TOKEN}
       - VBS_SRT_PASSPHRASE=${VBS_SRT_PASSPHRASE}
