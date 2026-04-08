@@ -1,4 +1,4 @@
-﻿#!/usr/bin/bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 if [[ -z "${VBS_ENGINE_SRT_INPUT_1_URI:-}" || -z "${VBS_ENGINE_SRT_INPUT_2_URI:-}" ]]; then

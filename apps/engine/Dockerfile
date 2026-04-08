@@ -51,4 +51,4 @@ WORKDIR /opt/brave
 
 EXPOSE 5000
 
-ENTRYPOINT ["/bin/bash", "/opt/vbs-engine/scripts/entrypoint.sh"]
+ENTRYPOINT ["bash", "/opt/vbs-engine/scripts/entrypoint.sh"]
