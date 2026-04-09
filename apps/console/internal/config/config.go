@@ -22,6 +22,10 @@ type Config struct {
 	AdminToken   string
 	TelemetryMax int // max raw WS message size (bytes), default 255
 	NodeCredentialsRaw string
+	CFAccessMode       string
+	CFAccessTeamDomain string
+	CFAccessAUD        string
+	CFAccessClientsRaw string
 }
 
 // Load reads configuration from environment variables.
@@ -58,5 +62,16 @@ func Load() (*Config, error) {
 		AdminToken:   admin,
 		TelemetryMax: maxPayload,
 		NodeCredentialsRaw: strings.TrimSpace(os.Getenv("VBS_CONSOLE_NODE_CREDENTIALS")),
+		CFAccessMode:       strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "disabled"))),
+		CFAccessTeamDomain: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_TEAM_DOMAIN")),
+		CFAccessAUD:        strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_AUD")),
+		CFAccessClientsRaw: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_CLIENTS")),
 	}, nil
+}
+
+func getenvDefault(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
 }

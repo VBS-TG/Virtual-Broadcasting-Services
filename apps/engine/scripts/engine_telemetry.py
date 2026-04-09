@@ -50,11 +50,15 @@ def _ws_url(base_url: str, path: str) -> str:
     return f"{scheme}://{u.netloc}{path}"
 
 
-def _http_post_json(url: str, body: dict, bearer: str, timeout_sec: int = 8) -> dict:
+def _http_post_json(url: str, body: dict, bearer: str, timeout_sec: int = 8, extra_headers: dict | None = None) -> dict:
     req = urllib.request.Request(url, method="POST")
     req.add_header("Content-Type", "application/json")
     if bearer:
         req.add_header("Authorization", f"Bearer {bearer}")
+    if extra_headers:
+        for k, v in extra_headers.items():
+            if v:
+                req.add_header(k, v)
     payload = json.dumps(body).encode("utf-8")
     with urllib.request.urlopen(req, payload, timeout=timeout_sec) as resp:
         raw = resp.read()
@@ -82,6 +86,27 @@ def _register_device(base_url: str, node_id: str, device_secret: str) -> Tuple[s
         exp = _jwt_exp_unverified(token)
     if not token:
         raise RuntimeError("empty access_token from register")
+    return token, exp
+
+
+def _register_with_cf_access(base_url: str, node_id: str, client_id: str, client_secret: str) -> Tuple[str, int]:
+    endpoint = urljoin(base_url.rstrip("/") + "/", "api/v1/auth/register")
+    out = _http_post_json(
+        endpoint,
+        {"node_id": node_id, "role": "engine"},
+        "",
+        extra_headers={
+            "CF-Access-Client-Id": client_id,
+            "CF-Access-Client-Secret": client_secret,
+            "X-VBS-Node-ID": node_id,
+        },
+    )
+    token = out.get("access_token", "")
+    exp = int(out.get("expires_at_unix", 0))
+    if not exp and token:
+        exp = _jwt_exp_unverified(token)
+    if not token:
+        raise RuntimeError("empty access_token from cf access register")
     return token, exp
 
 
@@ -119,6 +144,8 @@ def main() -> None:
     bootstrap = _env("VBS_ENGINE_BOOTSTRAP_TOKEN")
     device_id = _env("VBS_ENGINE_DEVICE_ID", node_id)
     device_secret = _env("VBS_ENGINE_DEVICE_SECRET")
+    cf_client_id = _env("VBS_CF_ACCESS_CLIENT_ID")
+    cf_client_secret = _env("VBS_CF_ACCESS_CLIENT_SECRET")
 
     sslopt = {}
     if ws_url.startswith("wss://") and insecure_tls:
@@ -136,11 +163,13 @@ def main() -> None:
                         auth.token = ""
                 if not auth.token and device_secret:
                     auth.token, auth.exp_unix = _register_device(base_url, device_id, device_secret)
+                if not auth.token and cf_client_id and cf_client_secret:
+                    auth.token, auth.exp_unix = _register_with_cf_access(base_url, device_id, cf_client_id, cf_client_secret)
                 if not auth.token and bootstrap:
                     auth.token, auth.exp_unix = _issue_token_with_bootstrap(base_url, bootstrap, node_id)
                 if not auth.token:
                     raise RuntimeError(
-                        "token missing/expiring and no auth source set (need VBS_ENGINE_DEVICE_SECRET or VBS_ENGINE_BOOTSTRAP_TOKEN)"
+                        "token missing/expiring and no auth source set (need cf access client, device secret, or bootstrap token)"
                     )
 
             metrics = {

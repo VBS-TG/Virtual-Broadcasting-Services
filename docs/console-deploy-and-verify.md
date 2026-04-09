@@ -1,4 +1,4 @@
-# Console 後端 MVP-A — 手動驗證
+# Console 後端部署與驗證說明
 
 本文件描述如何在本機或 Docker 中驗證 **healthz**、**JWT 發放/註冊/續約**、**遙測 WebSocket** 與 **latest 快照**。
 
@@ -8,6 +8,7 @@
   - `VBS_CONSOLE_JWT_SECRET`：HS256 簽章密鑰（必填）。
   - `VBS_CONSOLE_ADMIN_TOKEN`：發放 JWT 與查詢 `telemetry/latest` 的管理用共享密鑰（建議必填；未設定時 `/api/v1/auth/token` 會回 503）。
   - `VBS_CONSOLE_NODE_CREDENTIALS`：節點註冊資料（`node_id:role:device_secret` 逗號分隔）。
+  - `VBS_CF_ACCESS_MODE=service_token` 與 `VBS_CF_ACCESS_CLIENTS`：正式版節點註冊映射（Cloudflare Access）。
 - 服務預設監聽 `:4000`（可改 `VBS_CONSOLE_HTTP_BIND`）。
 
 ## 1. 啟動
@@ -47,12 +48,15 @@ $tok = (Invoke-RestMethod -Method POST -Uri http://127.0.0.1:4000/api/v1/auth/to
 
 ## 4. 節點註冊與續約（正式版）
 
-節點可不用預塞 JWT，改走註冊／續約：
+節點可不用預塞 JWT，改走註冊／續約（Cloudflare Access 正式版）：
 
 ```bash
 curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"node_id":"vbs-route-01","role":"route","device_secret":"dev-route-secret"}'
+  -H "CF-Access-Client-Id: route-client-id" \
+  -H "CF-Access-Client-Secret: route-client-secret" \
+  -H "X-VBS-Node-ID: vbs-route-01" \
+  -d '{"node_id":"vbs-route-01","role":"route"}'
 ```
 
 續約（舊 JWT 快到期時）：
@@ -101,11 +105,11 @@ curl -sS http://127.0.0.1:4000/api/v1/telemetry/latest \
 
 ---
 
-**限制（MVP-A）**：無完整 RBAC、refresh token、持久化；生產環境請旋轉密鑰、縮短 TTL，並改以安全管道注入 `VBS_CONSOLE_JWT_SECRET` / `VBS_CONSOLE_ADMIN_TOKEN`。
+**目前限制**：無完整 RBAC、refresh token、持久化；生產環境請旋轉密鑰、縮短 TTL，並改以安全管道注入 `VBS_CONSOLE_JWT_SECRET` / `VBS_CONSOLE_ADMIN_TOKEN`。
 
 ---
 
 ## 驗證備註（開發／CI）
 
 - 於安裝 **Go 1.22+** 的環境可執行：`go build -o console-server ./apps/console/cmd/console-server`（於 repo 根目錄）確認編譯通過。
-- 於安裝 **Docker** 的環境依 **§1** 啟動後依序完成 **§2–§5** 即為計畫要求之最小介面驗證。
+- 於安裝 **Docker** 的環境依 **§1** 啟動後依序完成 **§2–§5** 即為最小介面驗證。

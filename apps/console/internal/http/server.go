@@ -28,6 +28,7 @@ type Server struct {
 	cfg    *config.Config
 	jwt    *auth.Manager
 	nodes  *nodes.Registry
+	access *auth.CFAccessVerifier
 	hub    *telemetry.Hub
 	http   *http.Server
 	mux    *http.ServeMux
@@ -55,6 +56,11 @@ func New(cfg *config.Config) *Server {
 		reg = &nodes.Registry{}
 	}
 	s.nodes = reg
+	access, err := auth.NewCFAccessVerifier(cfg.CFAccessMode, cfg.CFAccessTeamDomain, cfg.CFAccessAUD, cfg.CFAccessClientsRaw)
+	if err != nil {
+		log.Printf("access verifier parse warning: %v", err)
+	}
+	s.access = access
 	s.routes()
 	s.http = &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -144,6 +150,27 @@ func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNodeRegister(w http.ResponseWriter, r *http.Request) {
+	if s.access != nil && s.access.Mode() != "" && s.access.Mode() != "disabled" {
+		identity, err := s.access.VerifyRequest(r)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized access identity"}`, http.StatusUnauthorized)
+			return
+		}
+		token, exp, err := s.jwt.Mint(identity.NodeID, identity.Role)
+		if err != nil {
+			http.Error(w, `{"error":"mint failed"}`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(tokenResponse{
+			AccessToken: token,
+			TokenType:   "Bearer",
+			ExpiresIn:   int64(s.cfg.JWTTTL.Seconds()),
+			ExpiresAt:   exp.Unix(),
+		})
+		return
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
 	if err != nil {
 		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
@@ -212,6 +239,11 @@ func (s *Server) handleSessionKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminAuthorized(r *http.Request) bool {
+	if s.access != nil && s.access.Mode() != "" && s.access.Mode() != "disabled" {
+		if identity, err := s.access.VerifyRequest(r); err == nil && strings.EqualFold(identity.Role, "admin") {
+			return true
+		}
+	}
 	h := strings.TrimSpace(r.Header.Get("Authorization"))
 	if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
 		return false

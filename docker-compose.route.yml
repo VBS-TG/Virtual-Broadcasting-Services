@@ -15,6 +15,9 @@ services:
       # 方案 A2：正式版 device 身分註冊，自動換發/續約 JWT
       - VBS_ROUTE_DEVICE_ID=${VBS_ROUTE_DEVICE_ID:-vbs-route-01}
       - VBS_ROUTE_DEVICE_SECRET=${VBS_ROUTE_DEVICE_SECRET}
+      # 方案 A3：Cloudflare Access service token（正式版建議）
+      - VBS_CF_ACCESS_CLIENT_ID=${VBS_CF_ACCESS_CLIENT_ID}
+      - VBS_CF_ACCESS_CLIENT_SECRET=${VBS_CF_ACCESS_CLIENT_SECRET}
       # 方案 B：只給 bootstrap token，由 Route 自動向 Console 換短效 JWT
       - VBS_ROUTE_BOOTSTRAP_TOKEN=${VBS_ROUTE_BOOTSTRAP_TOKEN}
       - VBS_SRT_PASSPHRASE=${VBS_SRT_PASSPHRASE}

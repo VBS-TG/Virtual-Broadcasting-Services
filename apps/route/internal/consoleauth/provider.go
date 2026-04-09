@@ -71,6 +71,13 @@ func (p *Provider) BearerToken(ctx context.Context, nodeID string) (string, erro
 			return p.cached, nil
 		}
 	}
+	if p.cfg.CFAccessClientID != "" && p.cfg.CFAccessClientSecret != "" {
+		token, exp, err := p.registerWithCFAccess(ctx)
+		if err == nil {
+			p.cached, p.expires = token, exp
+			return p.cached, nil
+		}
+	}
 
 	if p.cfg.BootstrapToken == "" {
 		return "", fmt.Errorf("no route jwt and no device credential/bootstrap token")
@@ -145,6 +152,32 @@ func (p *Provider) registerDevice(ctx context.Context) (string, time.Time, error
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return "", time.Time{}, fmt.Errorf("register endpoint status=%d", resp.StatusCode)
+	}
+	return decodeTokenResponse(resp)
+}
+
+func (p *Provider) registerWithCFAccess(ctx context.Context) (string, time.Time, error) {
+	endpoint := strings.TrimRight(p.cfg.ConsoleBaseURL, "/") + "/api/v1/auth/register"
+	body := map[string]string{
+		"node_id": p.cfg.NodeID,
+		"role":    "route",
+	}
+	buf, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("CF-Access-Client-Id", p.cfg.CFAccessClientID)
+	req.Header.Set("CF-Access-Client-Secret", p.cfg.CFAccessClientSecret)
+	req.Header.Set("X-VBS-Node-ID", p.cfg.NodeID)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", time.Time{}, fmt.Errorf("cf access register endpoint status=%d", resp.StatusCode)
 	}
 	return decodeTokenResponse(resp)
 }

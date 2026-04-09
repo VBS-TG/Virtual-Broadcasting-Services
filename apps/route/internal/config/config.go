@@ -26,6 +26,8 @@ type Config struct {
 	// Device bootstrap identity（正式版）
 	DeviceID     string
 	DeviceSecret string
+	CFAccessClientID     string
+	CFAccessClientSecret string
 
 	// WSS 遙測路徑（相對於 Console 主機），預設見 Load。
 	TelemetryWSPath string
@@ -64,6 +66,8 @@ const (
 	envBootstrapToken = "VBS_ROUTE_BOOTSTRAP_TOKEN"
 	envDeviceID       = "VBS_ROUTE_DEVICE_ID"
 	envDeviceSecret   = "VBS_ROUTE_DEVICE_SECRET"
+	envCFAccessClientID = "VBS_CF_ACCESS_CLIENT_ID"
+	envCFAccessClientSecret = "VBS_CF_ACCESS_CLIENT_SECRET"
 	envTelemetryPath  = "VBS_ROUTE_TELEMETRY_WS_PATH"
 	envTLSInsecure    = "VBS_ROUTE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY"
 
@@ -94,6 +98,8 @@ func Load() Config {
 		BootstrapToken: strings.TrimSpace(os.Getenv(envBootstrapToken)),
 		DeviceID:       strings.TrimSpace(os.Getenv(envDeviceID)),
 		DeviceSecret:   strings.TrimSpace(os.Getenv(envDeviceSecret)),
+		CFAccessClientID: strings.TrimSpace(os.Getenv(envCFAccessClientID)),
+		CFAccessClientSecret: strings.TrimSpace(os.Getenv(envCFAccessClientSecret)),
 		TelemetryWSPath: getenvOrDefault(envTelemetryPath, "/vbs/telemetry/ws"),
 	}
 
@@ -174,8 +180,8 @@ func (c Config) Validate() error {
 	if c.ConsoleBaseURL == "" {
 		return fmt.Errorf("VBS_CONSOLE_BASE_URL 為必填（Console 控制平面 HTTPS 基底）")
 	}
-	if c.RouteJWT == "" && c.BootstrapToken == "" && (c.DeviceID == "" || c.DeviceSecret == "") {
-		return fmt.Errorf("需設定 VBS_ROUTE_JWT（或 VBS_JWT），或 VBS_ROUTE_DEVICE_ID+VBS_ROUTE_DEVICE_SECRET，或舊版 VBS_ROUTE_BOOTSTRAP_TOKEN")
+	if c.RouteJWT == "" && c.BootstrapToken == "" && (c.DeviceID == "" || c.DeviceSecret == "") && (c.CFAccessClientID == "" || c.CFAccessClientSecret == "") {
+		return fmt.Errorf("需設定 VBS_ROUTE_JWT（或 VBS_JWT），或 Cloudflare Access client id/secret，或 device credential，或舊版 bootstrap token")
 	}
 	if c.SRTLAIngestPort <= 0 || c.SRTOutputPort <= 0 || c.InternalSRTPort <= 0 {
 		return fmt.Errorf("Route 埠號必須為正整數")

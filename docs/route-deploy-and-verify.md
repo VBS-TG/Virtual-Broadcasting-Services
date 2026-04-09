@@ -6,6 +6,7 @@
 
 - 已準備 **Console** 端可接受之 **HTTPS** 基底網址（`VBS_CONSOLE_BASE_URL`）及對應 **WSS** 遙測端點（見 `protocol.md`）。
 - 已設定 Route 認證方式（擇一）：  
+  - **`VBS_CF_ACCESS_CLIENT_ID` + `VBS_CF_ACCESS_CLIENT_SECRET`**（正式版建議，Cloudflare Access service token），或  
   - **`VBS_ROUTE_DEVICE_ID` + `VBS_ROUTE_DEVICE_SECRET`**（正式版推薦，透過 `/api/v1/auth/register` 自動換發/續約 JWT），或  
   - 直接注入 **`VBS_ROUTE_JWT`**（或 `VBS_JWT`），或  
   - 提供 **`VBS_ROUTE_BOOTSTRAP_TOKEN`**（舊版相容）。
@@ -14,13 +15,13 @@
 
 ## 啟動
 
-### 方式 A：使用 CI 推送之映像（建議於測試機）
+### 方式 A：使用 CI 推送之映像（建議於正式機）
 
 1. 確認 `main` 已合併且 GitHub Actions **Publish VBS-Route (GHCR)** 成功，或已打標籤 `v*` 並完成建置。
 2. `docker login ghcr.io`（需可讀取該套件之權限）。
 3. 拉取映像（請將路徑換成你們實際的 owner/repo，小寫）：
    - `docker pull ghcr.io/vbs-tg/virtual-broadcasting-services/vbs-route:latest`
-4. 以 `docker run --network host -e VBS_CONSOLE_BASE_URL=... -e VBS_ROUTE_JWT=... -e VBS_SRT_PASSPHRASE=... ... ghcr.io/.../vbs-route:latest`（或改用 `VBS_ROUTE_BOOTSTRAP_TOKEN`）啟動，亦可自行撰寫 compose **image:** 欄位指向上述映像。
+4. 以 `docker run --network host -e VBS_CONSOLE_BASE_URL=... -e VBS_CF_ACCESS_CLIENT_ID=... -e VBS_CF_ACCESS_CLIENT_SECRET=... -e VBS_SRT_PASSPHRASE=... ... ghcr.io/.../vbs-route:latest` 啟動，亦可自行撰寫 compose **image:** 欄位指向上述映像。
 
 ### 方式 B：於建置機本地 build
 
