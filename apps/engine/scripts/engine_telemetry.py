@@ -2,18 +2,17 @@
 """Engine telemetry sender with Console JWT bootstrap/refresh."""
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import ssl
 import time
 import urllib.request
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 from urllib.parse import urljoin, urlparse
 
 import psutil
-import websockets
+import websocket
 
 
 @dataclass
@@ -98,7 +97,7 @@ def _refresh_token(base_url: str, token: str) -> Tuple[str, int]:
     return new_token, exp
 
 
-async def main() -> None:
+def main() -> None:
     base_url = _env("VBS_CONSOLE_BASE_URL")
     if not base_url:
         print("[engine][telemetry] disabled: VBS_CONSOLE_BASE_URL not set")
@@ -121,12 +120,9 @@ async def main() -> None:
     device_id = _env("VBS_ENGINE_DEVICE_ID", node_id)
     device_secret = _env("VBS_ENGINE_DEVICE_SECRET")
 
-    ssl_ctx: Optional[ssl.SSLContext] = None
-    if ws_url.startswith("wss://"):
-        ssl_ctx = ssl.create_default_context()
-        if insecure_tls:
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = ssl.CERT_NONE
+    sslopt = {}
+    if ws_url.startswith("wss://") and insecure_tls:
+        sslopt = {"cert_reqs": ssl.CERT_NONE, "check_hostname": False}
 
     print(f"[engine][telemetry] start ws={ws_url} node_id={node_id}")
     while True:
@@ -164,24 +160,21 @@ async def main() -> None:
                 raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
             if len(raw) > telemetry_max:
                 print(f"[engine][telemetry] skip oversize payload bytes={len(raw)}")
-                await asyncio.sleep(interval)
+                time.sleep(interval)
                 continue
 
-            async with websockets.connect(
-                ws_url,
-                ssl=ssl_ctx,
-                additional_headers={"Authorization": f"Bearer {auth.token}"},
-                open_timeout=8,
-                close_timeout=5,
-                max_size=2 * 1024,
-            ) as ws:
-                await ws.send(raw.decode("utf-8"))
-            await asyncio.sleep(interval)
+            headers = [f"Authorization: Bearer {auth.token}"]
+            ws = websocket.create_connection(ws_url, timeout=8, header=headers, sslopt=sslopt)
+            try:
+                ws.send(raw.decode("utf-8"))
+            finally:
+                ws.close()
+            time.sleep(interval)
         except Exception as exc:  # pylint: disable=broad-except
             print(f"[engine][telemetry] send failed: {exc}")
-            await asyncio.sleep(min(5.0, interval + 1.0))
+            time.sleep(min(5.0, interval + 1.0))
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
 

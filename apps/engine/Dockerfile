@@ -40,7 +40,7 @@ RUN python3 -m venv --system-site-packages .venv \
          'uvloop>=0.21,<0.23' \
          'pillow>=9.5,<12' \
          'psutil>=5.6,<6' \
-         'websockets>=12,<15'
+         'websocket-client>=1.6,<2'
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/engine_telemetry.py /opt/vbs-engine/scripts/engine_telemetry.py
