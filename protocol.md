@@ -116,7 +116,7 @@
 
 ### 部署
 
-- 於 repo 根目錄建立 `.env.engine`（含 SRT URI、Console、`VBS_CF_ACCESS_*` 等），再執行：`docker compose -f docker-compose.engine.yml up --build`（會自動載入 `.env.engine`，無需再於 shell 匯出同名變數）。
+- 於 repo 根目錄建立 `.env.engine`（含 SRT URI、Console、`VBS_CF_ACCESS_*` 等），再執行：`docker compose -f docker-compose.engine.yml up --build`（會自動載入 `.env.engine`，無需再於 shell 匯出同名變數）。若曾用舊版 compose 殘留容器（例如 nginx），可加 `--remove-orphans` 一併清掉。
 - 需 **NVIDIA Container Toolkit** 與主機驅動；映像基底為 `nvidia/cuda:12.2.0-runtime-ubuntu22.04`。
 - Engine（rtc 子網域）：`docs/deploy/cloudflared-rtc.example.yml`
 - Console/API（api 子網域）：`docs/deploy/cloudflared-api.example.yml`
