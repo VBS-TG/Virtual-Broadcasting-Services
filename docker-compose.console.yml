@@ -1,6 +1,6 @@
 # Console MVP-A — JWT 發放、遙測 WSS hub、健康檢查。
 # 啟動：docker compose -f docker-compose.console.yml up --build
-# 本機：http://127.0.0.1:4000
+# 本機：http://127.0.0.1:5000（容器內仍為 :4000）
 
 services:
   console:
@@ -8,7 +8,7 @@ services:
       context: .
       dockerfile: apps/console/Dockerfile
     ports:
-      - "4000:4000"
+      - "5000:4000"
     environment:
       VBS_CONSOLE_HTTP_BIND: ":4000"
       # 開發用：正式環境請改為強隨機並以 secrets 注入

@@ -9,7 +9,7 @@
   - `VBS_CONSOLE_ADMIN_TOKEN`：發放 JWT 與查詢 `telemetry/latest` 的管理用共享密鑰（建議必填；未設定時 `/api/v1/auth/token` 會回 503）。
   - `VBS_CONSOLE_NODE_CREDENTIALS`：節點註冊資料（`node_id:role:device_secret` 逗號分隔）。
   - `VBS_CF_ACCESS_MODE=service_token` 與 `VBS_CF_ACCESS_CLIENTS`：正式版節點註冊映射（Cloudflare Access）。
-- 服務預設監聽 `:4000`（可改 `VBS_CONSOLE_HTTP_BIND`）。
+- 服務進程預設監聽 `:4000`（可改 `VBS_CONSOLE_HTTP_BIND`）；`docker-compose.console.yml` 將主機埠映射為 **5000**（避免與本機 4000 衝突）。
 
 ## 1. 啟動
 
@@ -20,7 +20,7 @@ docker compose -f docker-compose.console.yml up --build
 ## 2. Health
 
 ```bash
-curl -sS http://127.0.0.1:4000/healthz
+curl -sS http://127.0.0.1:5000/healthz
 # 預期：{"status":"ok"}
 ```
 
@@ -29,7 +29,7 @@ curl -sS http://127.0.0.1:4000/healthz
 以管理密鑰發放短效 token（`node_id` / `role` 與 Route/Engine 節點類型一致：`route`、`engine`、`capture`、`console`；另可發 `admin` 僅供除錯）：
 
 ```bash
-curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/token \
+curl -sS -X POST http://127.0.0.1:5000/api/v1/auth/token \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer dev-admin-token-change-me" \
   -d '{"node_id":"vbs-route-01","role":"route"}'
@@ -40,7 +40,7 @@ curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/token \
 將 `access_token` 設為環境變數（PowerShell 範例）：
 
 ```powershell
-$tok = (Invoke-RestMethod -Method POST -Uri http://127.0.0.1:4000/api/v1/auth/token `
+$tok = (Invoke-RestMethod -Method POST -Uri http://127.0.0.1:5000/api/v1/auth/token `
   -Headers @{ "Authorization"="Bearer dev-admin-token-change-me" } `
   -ContentType "application/json" `
   -Body '{"node_id":"vbs-route-01","role":"route"}').access_token
@@ -51,7 +51,7 @@ $tok = (Invoke-RestMethod -Method POST -Uri http://127.0.0.1:4000/api/v1/auth/to
 節點可不用預塞 JWT，改走註冊／續約（Cloudflare Access 正式版）：
 
 ```bash
-curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/register \
+curl -sS -X POST http://127.0.0.1:5000/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -H "CF-Access-Client-Id: route-client-id" \
   -H "CF-Access-Client-Secret: route-client-secret" \
@@ -62,7 +62,7 @@ curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/register \
 續約（舊 JWT 快到期時）：
 
 ```bash
-curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/refresh \
+curl -sS -X POST http://127.0.0.1:5000/api/v1/auth/refresh \
   -H "Authorization: Bearer <old_jwt>"
 ```
 
@@ -87,7 +87,7 @@ curl -sS -X POST http://127.0.0.1:4000/api/v1/auth/refresh \
 需帶 `role=admin` 的 JWT，或啟動初期以管理密鑰作為 bootstrap Bearer：
 
 ```bash
-curl -sS http://127.0.0.1:4000/api/v1/telemetry/latest \
+curl -sS http://127.0.0.1:5000/api/v1/telemetry/latest \
   -H "Authorization: Bearer dev-admin-token-change-me"
 ```
 
@@ -97,7 +97,7 @@ curl -sS http://127.0.0.1:4000/api/v1/telemetry/latest \
 
 設定 Route 容器／行程：
 
-- `VBS_CONSOLE_BASE_URL=http://127.0.0.1:4000`（或 Tunnel 後的 `https://api.example.com`）
+- `VBS_CONSOLE_BASE_URL=http://127.0.0.1:5000`（或 Tunnel 後的 `https://api.example.com`）
 - `VBS_ROUTE_DEVICE_ID` + `VBS_ROUTE_DEVICE_SECRET`（推薦，自動註冊/續約）
   - 或 `VBS_ROUTE_JWT=<上一步取得的 access_token>`（手動模式）
 

@@ -132,7 +132,7 @@
 
 ## VBS-Console（`apps/console`，MVP-A）
 
-Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 **節點最新狀態內存快照** 的最小服務；預設 HTTP `:4000`，對外可經 Cloudflare Tunnel（見 `docs/deploy/cloudflared-api.example.yml`）。
+Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 **節點最新狀態內存快照** 的最小服務；預設 HTTP `:4000`，本倉庫 `docker-compose.console.yml` 將主機埠映射為 **5000**（避免與本機 4000 衝突）；對外可經 Cloudflare Tunnel（見 `docs/deploy/cloudflared-api.example.yml`）。
 
 ### 環境變數（Console 行程）
 

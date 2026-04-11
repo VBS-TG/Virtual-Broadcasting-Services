@@ -310,7 +310,7 @@ AI 在實作設定讀取邏輯時，必須優先尋找以下變數，嚴禁 Hard
 
 | 欄位 | 說明 | 範例 (v1.2 規範) |
 | :--- | :--- | :--- |
-| **Service / Port** | 服務名稱與地端監聽埠口 | `Console-API / 4000` 或 `Engine-WHEP / 8081` |
+| **Service / Port** | 服務名稱與地端監聽埠口 | `Console-API / 5000`（compose 對外；進程內 `:4000`）或 `Engine-WHEP / 8081` |
 | **Public URL** | 透過 Cloudflare 映射之公網網址 | `https://api.yourdomain.com` 或 `wss://api.yourdomain.com` |
 | **Protocol Type** | 通訊協議類型 | `UDP/SRT (AES-256)`, `TCP/WSS`, `HTTPS/WHEP` |
 | **Endpoint / Topic** | API 路由或 WebSocket 主題 | `/api/v1/engine/reset` 或 `vbs/telemetry/capture-01` |

@@ -6,6 +6,7 @@ credentials-file: /etc/cloudflared/vbs-console-api.json
 
 ingress:
   - hostname: api.yourdomain.com
-    service: http://127.0.0.1:4000
+    # 與 docker-compose.console.yml 主機埠 5000→4000 對齊（本機 cloudflared 連主機 5000）
+    service: http://127.0.0.1:5000
   - service: http_status:404
 
