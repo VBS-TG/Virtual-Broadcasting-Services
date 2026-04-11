@@ -1,7 +1,6 @@
-# Console MVP-A — JWT 發放、遙測 WSS hub、健康檢查。
-# 啟動：docker compose -f docker-compose.console.yml up --build
+# Console — JWT、遙測 WSS、健康檢查。
+# 必填：同目錄建立 .env.console（VBS_CONSOLE_JWT_SECRET、VBS_CONSOLE_ADMIN_TOKEN、VBS_CF_ACCESS_CLIENTS 等，勿提交版本庫）。
 # 本機：http://127.0.0.1:5000（容器內仍為 :4000）
-
 services:
   console:
     build:
@@ -9,15 +8,10 @@ services:
       dockerfile: apps/console/Dockerfile
     ports:
       - "5000:4000"
+    env_file:
+      - path: .env.console
+        required: false
     environment:
       VBS_CONSOLE_HTTP_BIND: ":4000"
-      # 開發用：正式環境請改為強隨機並以 secrets 注入
-      VBS_CONSOLE_JWT_SECRET: ${VBS_CONSOLE_JWT_SECRET:-dev-console-jwt-secret-change-me}
-      VBS_CONSOLE_ADMIN_TOKEN: ${VBS_CONSOLE_ADMIN_TOKEN:-dev-admin-token-change-me}
       VBS_CONSOLE_JWT_TTL_SEC: "3600"
-      # Cloudflare Access：節點註冊唯一途徑（service_token）
-      VBS_CF_ACCESS_MODE: ${VBS_CF_ACCESS_MODE:-service_token}
-      VBS_CF_ACCESS_TEAM_DOMAIN: ${VBS_CF_ACCESS_TEAM_DOMAIN:-}
-      VBS_CF_ACCESS_AUD: ${VBS_CF_ACCESS_AUD:-}
-      # 格式：node_id:role:client_id[:subject][:email]
-      VBS_CF_ACCESS_CLIENTS: ${VBS_CF_ACCESS_CLIENTS:-vbs-route-01:route:route-client-id,vbs-engine:engine:engine-client-id,console-admin:admin:admin-client-id}
+      VBS_CF_ACCESS_MODE: service_token

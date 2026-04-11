@@ -4,9 +4,8 @@
 
 ## 前置
 
-- `VBS_CONSOLE_JWT_SECRET`：HS256 簽章密鑰（必填）。
-- `VBS_CONSOLE_ADMIN_TOKEN`：管理用共享密鑰（強烈建議；未設定時 `POST /api/v1/auth/token` 回 503）。
-- `VBS_CF_ACCESS_MODE=service_token` 與 `VBS_CF_ACCESS_CLIENTS`：節點註冊映射（必填）。
+- 於 repo 根目錄建立 **`.env.console`**（Compose 會自動載入；變數見 `protocol.md`）。
+- 至少需有：`VBS_CONSOLE_JWT_SECRET`、`VBS_CF_ACCESS_CLIENTS`；建議另有 `VBS_CONSOLE_ADMIN_TOKEN`。
 - 服務進程預設監聽 `:4000`；`docker-compose.console.yml` 將主機埠映射為 **5000**。
 
 ## 1. 啟動

@@ -160,7 +160,7 @@ Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 *
 
 ### 本機驗證
 
-- `docker compose -f docker-compose.console.yml up --build`
+- 建立 `.env.console` 後：`docker compose -f docker-compose.console.yml up --build`（會自動載入該檔）。
 - 步驟見 `docs/console-deploy-and-verify.md`。
 
 ---
