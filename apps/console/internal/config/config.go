@@ -21,7 +21,6 @@ type Config struct {
 	JWTTTL       time.Duration
 	AdminToken   string
 	TelemetryMax int // max raw WS message size (bytes), default 255
-	NodeCredentialsRaw string
 	CFAccessMode       string
 	CFAccessTeamDomain string
 	CFAccessAUD        string
@@ -61,8 +60,7 @@ func Load() (*Config, error) {
 		JWTTTL:       time.Duration(ttlSec) * time.Second,
 		AdminToken:   admin,
 		TelemetryMax: maxPayload,
-		NodeCredentialsRaw: strings.TrimSpace(os.Getenv("VBS_CONSOLE_NODE_CREDENTIALS")),
-		CFAccessMode:       strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "disabled"))),
+		CFAccessMode:       strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "service_token"))),
 		CFAccessTeamDomain: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_TEAM_DOMAIN")),
 		CFAccessAUD:        strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_AUD")),
 		CFAccessClientsRaw: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_CLIENTS")),

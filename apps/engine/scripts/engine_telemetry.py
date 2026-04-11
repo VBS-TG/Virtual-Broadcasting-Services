@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Engine telemetry sender with Console JWT bootstrap/refresh."""
+"""Engine telemetry: Cloudflare Access register/refresh + WSS to Console."""
 from __future__ import annotations
 
 import json
@@ -65,30 +65,6 @@ def _http_post_json(url: str, body: dict, bearer: str, timeout_sec: int = 8, ext
     return json.loads(raw.decode("utf-8"))
 
 
-def _issue_token_with_bootstrap(base_url: str, bootstrap: str, node_id: str) -> Tuple[str, int]:
-    endpoint = urljoin(base_url.rstrip("/") + "/", "api/v1/auth/token")
-    out = _http_post_json(endpoint, {"node_id": node_id, "role": "engine"}, bootstrap)
-    token = out.get("access_token", "")
-    exp = int(out.get("expires_at_unix", 0))
-    if not exp and token:
-        exp = _jwt_exp_unverified(token)
-    if not token:
-        raise RuntimeError("empty access_token from console")
-    return token, exp
-
-
-def _register_device(base_url: str, node_id: str, device_secret: str) -> Tuple[str, int]:
-    endpoint = urljoin(base_url.rstrip("/") + "/", "api/v1/auth/register")
-    out = _http_post_json(endpoint, {"node_id": node_id, "role": "engine", "device_secret": device_secret}, "")
-    token = out.get("access_token", "")
-    exp = int(out.get("expires_at_unix", 0))
-    if not exp and token:
-        exp = _jwt_exp_unverified(token)
-    if not token:
-        raise RuntimeError("empty access_token from register")
-    return token, exp
-
-
 def _register_with_cf_access(base_url: str, node_id: str, client_id: str, client_secret: str) -> Tuple[str, int]:
     endpoint = urljoin(base_url.rstrip("/") + "/", "api/v1/auth/register")
     out = _http_post_json(
@@ -138,14 +114,10 @@ def main() -> None:
     telemetry_max = int(_env("VBS_ENGINE_TELEMETRY_MAX_BYTES", "255"))
     insecure_tls = _env("VBS_ENGINE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY", "0") in {"1", "true", "True"}
 
-    auth = AuthState(token=_env("VBS_ENGINE_JWT"))
-    if auth.token:
-        auth.exp_unix = _jwt_exp_unverified(auth.token)
-    bootstrap = _env("VBS_ENGINE_BOOTSTRAP_TOKEN")
-    device_id = _env("VBS_ENGINE_DEVICE_ID", node_id)
-    device_secret = _env("VBS_ENGINE_DEVICE_SECRET")
     cf_client_id = _env("VBS_CF_ACCESS_CLIENT_ID")
     cf_client_secret = _env("VBS_CF_ACCESS_CLIENT_SECRET")
+
+    auth = AuthState()
 
     sslopt = {}
     if ws_url.startswith("wss://") and insecure_tls:
@@ -161,16 +133,10 @@ def main() -> None:
                         auth.token, auth.exp_unix = _refresh_token(base_url, auth.token)
                     except Exception:
                         auth.token = ""
-                if not auth.token and device_secret:
-                    auth.token, auth.exp_unix = _register_device(base_url, device_id, device_secret)
-                if not auth.token and cf_client_id and cf_client_secret:
-                    auth.token, auth.exp_unix = _register_with_cf_access(base_url, device_id, cf_client_id, cf_client_secret)
-                if not auth.token and bootstrap:
-                    auth.token, auth.exp_unix = _issue_token_with_bootstrap(base_url, bootstrap, node_id)
                 if not auth.token:
-                    raise RuntimeError(
-                        "token missing/expiring and no auth source set (need cf access client, device secret, or bootstrap token)"
-                    )
+                    if not (cf_client_id and cf_client_secret):
+                        raise RuntimeError("VBS_CF_ACCESS_CLIENT_ID and VBS_CF_ACCESS_CLIENT_SECRET are required")
+                    auth.token, auth.exp_unix = _register_with_cf_access(base_url, node_id, cf_client_id, cf_client_secret)
 
             metrics = {
                 "cpu_pct": round(psutil.cpu_percent(interval=None), 2),
@@ -206,4 +172,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -16,7 +16,7 @@ import (
 	"vbs/apps/route/internal/config"
 )
 
-// Provider keeps a cached JWT and refreshes it when near expiry.
+// Provider keeps a cached JWT and refreshes it when near expiry (Cloudflare Access only).
 type Provider struct {
 	cfg    config.Config
 	client http.Client
@@ -37,11 +37,10 @@ func NewProvider(cfg config.Config) *Provider {
 			Timeout:   8 * time.Second,
 			Transport: tr,
 		},
-		cached: cfg.RouteJWT,
 	}
 }
 
-func (p *Provider) BearerToken(ctx context.Context, nodeID string) (string, error) {
+func (p *Provider) BearerToken(ctx context.Context) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -57,103 +56,21 @@ func (p *Provider) BearerToken(ctx context.Context, nodeID string) (string, erro
 		}
 	}
 	if p.cached != "" {
-		// Try refresh when token exists but nearing expiry.
 		if t, exp, err := p.refreshToken(ctx, p.cached); err == nil {
 			p.cached, p.expires = t, exp
 			return p.cached, nil
 		}
 	}
 
-	if p.cfg.DeviceID != "" && p.cfg.DeviceSecret != "" {
-		token, exp, err := p.registerDevice(ctx)
-		if err == nil {
-			p.cached, p.expires = token, exp
-			return p.cached, nil
-		}
-	}
 	if p.cfg.CFAccessClientID != "" && p.cfg.CFAccessClientSecret != "" {
 		token, exp, err := p.registerWithCFAccess(ctx)
-		if err == nil {
-			p.cached, p.expires = token, exp
-			return p.cached, nil
+		if err != nil {
+			return "", fmt.Errorf("cloudflare access register: %w", err)
 		}
+		p.cached, p.expires = token, exp
+		return p.cached, nil
 	}
-
-	if p.cfg.BootstrapToken == "" {
-		return "", fmt.Errorf("no route jwt and no device credential/bootstrap token")
-	}
-
-	token, exp, err := p.fetchToken(ctx, nodeID)
-	if err != nil {
-		return "", err
-	}
-	p.cached = token
-	p.expires = exp
-	return token, nil
-}
-
-func (p *Provider) fetchToken(ctx context.Context, nodeID string) (string, time.Time, error) {
-	endpoint := strings.TrimRight(p.cfg.ConsoleBaseURL, "/") + "/api/v1/auth/token"
-	body := map[string]string{
-		"node_id": nodeID,
-		"role":    "route",
-	}
-	buf, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.cfg.BootstrapToken)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", time.Time{}, fmt.Errorf("token endpoint status=%d", resp.StatusCode)
-	}
-	var out struct {
-		AccessToken string `json:"access_token"`
-		ExpiresAt   int64  `json:"expires_at_unix"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", time.Time{}, err
-	}
-	if out.AccessToken == "" {
-		return "", time.Time{}, fmt.Errorf("empty access_token")
-	}
-	exp := time.Unix(out.ExpiresAt, 0)
-	if out.ExpiresAt == 0 {
-		if t, ok := jwtExp(out.AccessToken); ok {
-			exp = t
-		}
-	}
-	return out.AccessToken, exp, nil
-}
-
-func (p *Provider) registerDevice(ctx context.Context) (string, time.Time, error) {
-	endpoint := strings.TrimRight(p.cfg.ConsoleBaseURL, "/") + "/api/v1/auth/register"
-	body := map[string]string{
-		"node_id":       p.cfg.DeviceID,
-		"role":          "route",
-		"device_secret": p.cfg.DeviceSecret,
-	}
-	buf, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", time.Time{}, fmt.Errorf("register endpoint status=%d", resp.StatusCode)
-	}
-	return decodeTokenResponse(resp)
+	return "", fmt.Errorf("VBS_CF_ACCESS_CLIENT_ID and VBS_CF_ACCESS_CLIENT_SECRET are required")
 }
 
 func (p *Provider) registerWithCFAccess(ctx context.Context) (string, time.Time, error) {
@@ -230,4 +147,3 @@ func jwtExp(raw string) (time.Time, bool) {
 	}
 	return claims.ExpiresAt.Time, true
 }
-

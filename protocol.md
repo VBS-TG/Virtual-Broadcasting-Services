@@ -8,10 +8,7 @@
 | :--- | :--- | :--- |
 | `VBS_SRT_PASSPHRASE` | 是 | 全系統 SRT AES-256 密鑰，長度 10–64 字元。 |
 | `VBS_CONSOLE_BASE_URL` | 是 | Console 控制平面 HTTPS **原點**（例 `https://api.example.com`，建議不含路徑前綴）；若 Hub 在子路徑，請改以 `VBS_ROUTE_TELEMETRY_WS_PATH` 指定完整路徑。 |
-| `VBS_ROUTE_JWT`（或 `VBS_JWT`） | 否 | 若已由 Console 簽發，可直接注入 Route Bearer JWT。 |
-| `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET` | 否 | 正式版建議：Route 以 Cloudflare Access service token 呼叫 `POST /api/v1/auth/register` 自動換發/續約 JWT。 |
-| `VBS_ROUTE_DEVICE_ID` / `VBS_ROUTE_DEVICE_SECRET` | 否 | 正式版建議：Route 以 Device 身分向 Console `POST /api/v1/auth/register` 自動換發/續約 JWT。 |
-| `VBS_ROUTE_BOOTSTRAP_TOKEN` | 否 | 若未提供 `VBS_ROUTE_JWT`，Route 啟動時以 bootstrap Bearer token 自動向 Console 申請短效 JWT。 |
+| `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET` | 是 | Route 以 Cloudflare Access service token 呼叫 `POST /api/v1/auth/register` 自動換發/續約 JWT。 |
 | `VBS_NODE_ID` | 否 | 預設 `vbs-route-01`。 |
 | `VBS_ROUTE_TELEMETRY_WS_PATH` | 否 | 預設 `/vbs/telemetry/ws`（相對於 Console 主機）。 |
 | `VBS_METRICS_INTERVAL` | 否 | 預設 `1000ms`（1Hz）。 |
@@ -84,7 +81,7 @@
 ## VBS-Engine（`apps/engine`）
 
 基於 [BBC Brave](https://github.com/bbc/brave)（GStreamer）：**2 路 SRT（`uri` 入）**、左右分割 **mixer**、**WebRTC** 監看（Brave 內建網頁/API，**非**標準 WHEP；標準 WHEP 可後續再換）、**TCP MPEG** 接 **ffmpeg** 再以 **SRT Caller** 輸出 **PGM**。  
-**WSS 遙測**：已實作（1Hz，Bearer JWT，單筆 ≤255 bytes），可由 bootstrap token 自動換發短效權杖。
+**WSS 遙測**：已實作（1Hz，Bearer JWT，單筆 ≤255 bytes），以 Cloudflare Access 向 Console 註冊後自動換發/續約 JWT。
 
 ### 環境變數（Engine 容器）
 
@@ -99,10 +96,7 @@
 | `PORT` / `VBS_ENGINE_API_PORT` | 否 | Brave REST/Web 預設 `5000` |
 | `VBS_ENGINE_STUN_SERVER` | 否 | WebRTC 用，預設 `stun.l.google.com:19302` |
 | `VBS_CONSOLE_BASE_URL` | 否 | 設定後啟用 Engine telemetry，以上報至 Console `wss://.../vbs/telemetry/ws`。 |
-| `VBS_ENGINE_JWT` | 否 | 可直接注入已簽發 Engine JWT。 |
-| `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET` | 否 | 正式版建議：Engine 以 Cloudflare Access service token 呼叫 `POST /api/v1/auth/register` 自動換發/續約 JWT。 |
-| `VBS_ENGINE_DEVICE_ID` / `VBS_ENGINE_DEVICE_SECRET` | 否 | 正式版建議：Engine 以 Device 身分向 Console `POST /api/v1/auth/register` 自動換發/續約 JWT。 |
-| `VBS_ENGINE_BOOTSTRAP_TOKEN` | 否 | 若未提供 `VBS_ENGINE_JWT`，Engine 以此 bootstrap token 自動向 Console 申請短效 JWT。 |
+| `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET` | 是（啟用 telemetry 時） | Engine 以 Cloudflare Access service token 呼叫 `POST /api/v1/auth/register` 自動換發/續約 JWT。 |
 | `VBS_ENGINE_TELEMETRY_ENABLED` | 否 | 預設 `1`；設 `0` 關閉 telemetry。 |
 | `VBS_ENGINE_TELEMETRY_WS_PATH` | 否 | 預設 `/vbs/telemetry/ws`。 |
 | `VBS_METRICS_INTERVAL_SEC` | 否 | 預設 `1` 秒（1Hz）。 |
@@ -139,10 +133,9 @@ Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 *
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
 | `VBS_CONSOLE_JWT_SECRET` | 是 | HS256 簽章密鑰；Route/Engine 所持 JWT 須由此密鑰簽出。 |
-| `VBS_CONSOLE_ADMIN_TOKEN` | 強烈建議 | 啟動初期 bootstrap 管理密鑰；以 `Authorization: Bearer <token>` 呼叫 `POST /api/v1/auth/token` 取得 admin JWT。未設定時發證端點回 503。 |
-| `VBS_CONSOLE_NODE_CREDENTIALS` | 建議 | 節點 Device 註冊憑證清單（`node_id:role:device_secret` 以逗號分隔），供 `POST /api/v1/auth/register` 使用。 |
-| `VBS_CF_ACCESS_MODE` | 建議 | `service_token`（正式版建議）/`disabled`；控制 `POST /api/v1/auth/register` 的 Cloudflare Access 身分驗證模式。 |
-| `VBS_CF_ACCESS_CLIENTS` | 建議 | Cloudflare Access 許可清單（`node_id:role:client_id[:subject][:email]`），供節點自動註冊映射。 |
+| `VBS_CONSOLE_ADMIN_TOKEN` | 強烈建議 | 管理密鑰；以 `Authorization: Bearer <token>` 呼叫 `POST /api/v1/auth/token` 取得 admin JWT。未設定時發證端點回 503。 |
+| `VBS_CF_ACCESS_MODE` | 建議 | `service_token`（預設）；設為 `disabled` 時 `POST /api/v1/auth/register` 回 503。 |
+| `VBS_CF_ACCESS_CLIENTS` | 是 | Cloudflare Access 許可清單（`node_id:role:client_id[:subject][:email]`），供節點註冊映射。 |
 | `VBS_CONSOLE_HTTP_BIND` | 否 | 預設 `:4000`。 |
 | `VBS_CONSOLE_JWT_TTL_SEC` | 否 | 簽發 token 有效期（秒），預設 `3600`，最小 `60`。 |
 | `VBS_CONSOLE_TELEMETRY_MAX_BYTES` | 否 | 單筆 WS 訊息上限，預設 `255`（與 1Hz／≤255B 規範一致）。 |
@@ -152,18 +145,18 @@ Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 *
 | Service / Port | Protocol | Endpoint | Auth Mode | Node Context |
 | --- | --- | --- | --- | --- |
 | Console-HTTP / 4000 | HTTP | `GET /healthz` | 無 | 健康檢查 |
-| Console-HTTP / 4000 | HTTP | `POST /api/v1/auth/token` | `Authorization: Bearer <admin bootstrap token 或 admin JWT>` | 簽發節點 JWT（claims：`node_id`、`role`、`exp`） |
-| Console-HTTP / 4000 | HTTP | `POST /api/v1/auth/register` | Cloudflare Access（`CF-Access-Client-Id`/`CF-Access-Client-Secret`）或 Device credentials（相容） | 節點自動註冊換發 JWT |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/auth/token` | `Authorization: Bearer <VBS_CONSOLE_ADMIN_TOKEN 或 admin JWT>` | 簽發節點 JWT（claims：`node_id`、`role`、`exp`） |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/auth/register` | Cloudflare Access（`CF-Access-Client-Id`/`CF-Access-Client-Secret`） | 節點自動註冊換發 JWT |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/auth/refresh` | `Authorization: Bearer <JWT>` | 節點 JWT 續約 |
 | Console-Telemetry | WS/WSS | `GET /vbs/telemetry/ws`（Upgrade） | `Authorization: Bearer <JWT>`；`role` 須為 `capture`／`route`／`engine`／`console` | Route/Engine/Capture → Console |
-| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <admin bootstrap token 或 admin JWT>` | 讀取每節點最近一次遙測（內存） |
-| Console-HTTP / 4000 | HTTP | `POST /api/v1/stream/session-key` | `Authorization: Bearer <admin bootstrap token 或 admin JWT>` | 生成當次直播 SRT AES-256 passphrase |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <VBS_CONSOLE_ADMIN_TOKEN 或 admin JWT>` | 讀取每節點最近一次遙測（內存） |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/stream/session-key` | `Authorization: Bearer <VBS_CONSOLE_ADMIN_TOKEN 或 admin JWT>` | 生成當次直播 SRT AES-256 passphrase |
 
 ### JWT（MVP-A）
 
 - 演算法：`HS256`。
 - 節點權杖：`role` 為上表節點類型或 `admin`（後者不可用於遙測 WS，僅可查詢／維運）。
-- 客戶端：Route／Engine 將簽發的 `access_token` 設入 `VBS_ROUTE_JWT`／`VBS_ENGINE_JWT`（或 `VBS_JWT`），與既有 Bearer 遙測路徑相容。
+- 客戶端：Route／Engine 執行期向 Console 註冊/續約取得 `access_token`，以 Bearer 連線 WSS 遙測。
 
 ### 本機驗證
 

@@ -20,14 +20,17 @@ type WSSClient struct {
 	auth   *consoleauth.Provider
 }
 
-func NewWSSClient(cfg config.Config) *WSSClient {
+func NewWSSClient(cfg config.Config, auth *consoleauth.Provider) *WSSClient {
+	if auth == nil {
+		auth = consoleauth.NewProvider(cfg)
+	}
 	d := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 	}
 	if cfg.TelemetryTLSInsecureSkipVerify {
 		d.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // 僅供測試環境明確開啟
 	}
-	return &WSSClient{cfg: cfg, dialer: d, auth: consoleauth.NewProvider(cfg)}
+	return &WSSClient{cfg: cfg, dialer: d, auth: auth}
 }
 
 // SendOne 建立短連線並送出單筆 JSON（Fire-and-forget 模式下的「每次上報重新連線」簡化實作；長連線可後續優化）。
@@ -38,7 +41,7 @@ func (c *WSSClient) SendOne(ctx context.Context, payload []byte) error {
 	}
 
 	header := http.Header{}
-	token, err := c.auth.BearerToken(ctx, c.cfg.NodeID)
+	token, err := c.auth.BearerToken(ctx)
 	if err != nil {
 		return err
 	}

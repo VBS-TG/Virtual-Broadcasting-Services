@@ -19,13 +19,6 @@ type Config struct {
 
 	// Console 控制平面（HTTPS 基底網址，用於衍生 WSS 遙測 URL）
 	ConsoleBaseURL string
-	// RouteJWT 可直接注入已簽發 JWT；若未提供可改用 BootstrapToken 自動向 Console 申請。
-	RouteJWT string
-	// BootstrapToken 為舊版相容用 token（可換取短效節點 JWT）。
-	BootstrapToken string
-	// Device bootstrap identity（正式版）
-	DeviceID     string
-	DeviceSecret string
 	CFAccessClientID     string
 	CFAccessClientSecret string
 
@@ -61,11 +54,6 @@ const (
 	envLogLevel      = "VBS_LOG_LEVEL"
 
 	envConsoleBaseURL = "VBS_CONSOLE_BASE_URL"
-	envRouteJWT       = "VBS_ROUTE_JWT"
-	envGlobalJWT      = "VBS_JWT"
-	envBootstrapToken = "VBS_ROUTE_BOOTSTRAP_TOKEN"
-	envDeviceID       = "VBS_ROUTE_DEVICE_ID"
-	envDeviceSecret   = "VBS_ROUTE_DEVICE_SECRET"
 	envCFAccessClientID = "VBS_CF_ACCESS_CLIENT_ID"
 	envCFAccessClientSecret = "VBS_CF_ACCESS_CLIENT_SECRET"
 	envTelemetryPath  = "VBS_ROUTE_TELEMETRY_WS_PATH"
@@ -94,10 +82,6 @@ func Load() Config {
 		LogLevel:      getenvOrDefault(envLogLevel, "info"),
 
 		ConsoleBaseURL: strings.TrimSpace(os.Getenv(envConsoleBaseURL)),
-		RouteJWT:       strings.TrimSpace(getenvFirstNonEmpty(envRouteJWT, envGlobalJWT)),
-		BootstrapToken: strings.TrimSpace(os.Getenv(envBootstrapToken)),
-		DeviceID:       strings.TrimSpace(os.Getenv(envDeviceID)),
-		DeviceSecret:   strings.TrimSpace(os.Getenv(envDeviceSecret)),
 		CFAccessClientID: strings.TrimSpace(os.Getenv(envCFAccessClientID)),
 		CFAccessClientSecret: strings.TrimSpace(os.Getenv(envCFAccessClientSecret)),
 		TelemetryWSPath: getenvOrDefault(envTelemetryPath, "/vbs/telemetry/ws"),
@@ -180,8 +164,8 @@ func (c Config) Validate() error {
 	if c.ConsoleBaseURL == "" {
 		return fmt.Errorf("VBS_CONSOLE_BASE_URL 為必填（Console 控制平面 HTTPS 基底）")
 	}
-	if c.RouteJWT == "" && c.BootstrapToken == "" && (c.DeviceID == "" || c.DeviceSecret == "") && (c.CFAccessClientID == "" || c.CFAccessClientSecret == "") {
-		return fmt.Errorf("需設定 VBS_ROUTE_JWT（或 VBS_JWT），或 Cloudflare Access client id/secret，或 device credential，或舊版 bootstrap token")
+	if c.CFAccessClientID == "" || c.CFAccessClientSecret == "" {
+		return fmt.Errorf("需設定 VBS_CF_ACCESS_CLIENT_ID 與 VBS_CF_ACCESS_CLIENT_SECRET（Cloudflare Access service token）")
 	}
 	if c.SRTLAIngestPort <= 0 || c.SRTOutputPort <= 0 || c.InternalSRTPort <= 0 {
 		return fmt.Errorf("Route 埠號必須為正整數")
@@ -203,15 +187,6 @@ func getenvOrDefault(key, def string) string {
 		return v
 	}
 	return def
-}
-
-func getenvFirstNonEmpty(keys ...string) string {
-	for _, k := range keys {
-		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func getenvIntOrDefault(key string, def int) int {

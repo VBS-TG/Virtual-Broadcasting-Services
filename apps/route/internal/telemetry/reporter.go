@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"vbs/apps/route/internal/config"
+	"vbs/apps/route/internal/consoleauth"
 	"vbs/apps/route/internal/srtla"
 	"vbs/apps/route/internal/system"
 )
@@ -25,12 +26,12 @@ type Metrics struct {
 }
 
 // StartReporter 以 MetricsInterval 週期取樣、送 WSS、並寫入結構化日誌；可選觸發管線重啟。
-func StartReporter(ctx context.Context, cfg config.Config, logger *log.Logger, pipeline *srtla.Pipeline, collector *IngestCollector, restart chan<- struct{}) {
+func StartReporter(ctx context.Context, cfg config.Config, logger *log.Logger, pipeline *srtla.Pipeline, collector *IngestCollector, restart chan<- struct{}, auth *consoleauth.Provider) {
 	if logger == nil {
 		logger = log.Default()
 	}
 
-	wss := NewWSSClient(cfg)
+	wss := NewWSSClient(cfg, auth)
 	stall := NewStallTracker(cfg)
 	ticker := time.NewTicker(cfg.MetricsInterval)
 	defer ticker.Stop()

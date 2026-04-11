@@ -15,9 +15,7 @@ services:
       VBS_CONSOLE_JWT_SECRET: ${VBS_CONSOLE_JWT_SECRET:-dev-console-jwt-secret-change-me}
       VBS_CONSOLE_ADMIN_TOKEN: ${VBS_CONSOLE_ADMIN_TOKEN:-dev-admin-token-change-me}
       VBS_CONSOLE_JWT_TTL_SEC: "3600"
-      # 舊版 device_secret 註冊白名單（格式 node_id:role:device_secret）
-      VBS_CONSOLE_NODE_CREDENTIALS: ${VBS_CONSOLE_NODE_CREDENTIALS:-vbs-route-01:route:dev-route-secret,vbs-engine:engine:dev-engine-secret}
-      # Cloudflare Access 正式版（service_token 模式建議）
+      # Cloudflare Access：節點註冊唯一途徑（service_token）
       VBS_CF_ACCESS_MODE: ${VBS_CF_ACCESS_MODE:-service_token}
       VBS_CF_ACCESS_TEAM_DOMAIN: ${VBS_CF_ACCESS_TEAM_DOMAIN:-}
       VBS_CF_ACCESS_AUD: ${VBS_CF_ACCESS_AUD:-}

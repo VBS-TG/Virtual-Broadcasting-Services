@@ -15,7 +15,6 @@ import (
 
 	"vbs/apps/console/internal/auth"
 	"vbs/apps/console/internal/config"
-	"vbs/apps/console/internal/nodes"
 	"vbs/apps/console/internal/telemetry"
 
 	"github.com/gorilla/websocket"
@@ -27,7 +26,6 @@ const maxTokenBodyBytes = 4096
 type Server struct {
 	cfg    *config.Config
 	jwt    *auth.Manager
-	nodes  *nodes.Registry
 	access *auth.CFAccessVerifier
 	hub    *telemetry.Hub
 	http   *http.Server
@@ -50,12 +48,6 @@ func New(cfg *config.Config) *Server {
 			},
 		},
 	}
-	reg, err := nodes.ParseRegistry(cfg.NodeCredentialsRaw)
-	if err != nil {
-		log.Printf("node registry parse warning: %v", err)
-		reg = &nodes.Registry{}
-	}
-	s.nodes = reg
 	access, err := auth.NewCFAccessVerifier(cfg.CFAccessMode, cfg.CFAccessTeamDomain, cfg.CFAccessAUD, cfg.CFAccessClientsRaw)
 	if err != nil {
 		log.Printf("access verifier parse warning: %v", err)
@@ -108,12 +100,6 @@ type tokenResponse struct {
 	ExpiresAt   int64  `json:"expires_at_unix"`
 }
 
-type registerRequest struct {
-	NodeID       string `json:"node_id"`
-	Role         string `json:"role"`
-	DeviceSecret string `json:"device_secret"`
-}
-
 func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.AdminToken == "" {
 		http.Error(w, `{"error":"admin token not configured"}`, http.StatusServiceUnavailable)
@@ -150,42 +136,16 @@ func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNodeRegister(w http.ResponseWriter, r *http.Request) {
-	if s.access != nil && s.access.Mode() != "" && s.access.Mode() != "disabled" {
-		identity, err := s.access.VerifyRequest(r)
-		if err != nil {
-			http.Error(w, `{"error":"unauthorized access identity"}`, http.StatusUnauthorized)
-			return
-		}
-		token, exp, err := s.jwt.Mint(identity.NodeID, identity.Role)
-		if err != nil {
-			http.Error(w, `{"error":"mint failed"}`, http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(tokenResponse{
-			AccessToken: token,
-			TokenType:   "Bearer",
-			ExpiresIn:   int64(s.cfg.JWTTTL.Seconds()),
-			ExpiresAt:   exp.Unix(),
-		})
+	if s.access == nil || s.access.Mode() == "" || s.access.Mode() == "disabled" {
+		http.Error(w, `{"error":"node registration requires Cloudflare Access (VBS_CF_ACCESS_MODE=service_token)"}`, http.StatusServiceUnavailable)
 		return
 	}
-
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
+	identity, err := s.access.VerifyRequest(r)
 	if err != nil {
-		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"unauthorized access identity"}`, http.StatusUnauthorized)
 		return
 	}
-	var req registerRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-	if !s.nodes.Check(req.NodeID, req.Role, req.DeviceSecret) {
-		http.Error(w, `{"error":"unauthorized device"}`, http.StatusUnauthorized)
-		return
-	}
-	token, exp, err := s.jwt.Mint(req.NodeID, req.Role)
+	token, exp, err := s.jwt.Mint(identity.NodeID, identity.Role)
 	if err != nil {
 		http.Error(w, `{"error":"mint failed"}`, http.StatusBadRequest)
 		return
@@ -250,7 +210,6 @@ func (s *Server) adminAuthorized(r *http.Request) bool {
 	}
 	raw := strings.TrimSpace(h[7:])
 	if constantTimeEqual(raw, s.cfg.AdminToken) {
-		// Bootstrap mode: allow Bearer <admin bootstrap token> to mint first admin JWT.
 		return true
 	}
 	claims, err := s.jwt.Parse(raw)

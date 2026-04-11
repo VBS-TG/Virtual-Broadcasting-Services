@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"vbs/apps/route/internal/config"
+	"vbs/apps/route/internal/consoleauth"
 	"vbs/apps/route/internal/ctrl"
 	"vbs/apps/route/internal/rtstate"
 	"vbs/apps/route/internal/srtla"
@@ -35,9 +36,10 @@ func Run(ctx context.Context, cfg config.Config) {
 	go pipeline.Run(ctx, restartCh)
 
 	collector := telemetry.NewIngestCollector(cfg.IngestIface)
-	go telemetry.StartReporter(ctx, cfg, logger, pipeline, collector, restartCh)
+	auth := consoleauth.NewProvider(cfg)
+	go telemetry.StartReporter(ctx, cfg, logger, pipeline, collector, restartCh, auth)
 
-	ctrl.Start(ctx, cfg, buf, restartCh, logger)
+	ctrl.Start(ctx, cfg, buf, restartCh, logger, auth)
 
 	<-ctx.Done()
 }
