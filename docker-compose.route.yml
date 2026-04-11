@@ -1,18 +1,17 @@
+# 必填變數請寫入同目錄 .env.route（勿提交版本庫）。
 services:
   vbs-route:
     build:
       context: .
       dockerfile: apps/route/Dockerfile
     network_mode: host
+    env_file:
+      - path: .env.route
+        required: false
     environment:
       - VBS_NODE_ID=vbs-route-01
       - VBS_LOG_LEVEL=info
       - VBS_METRICS_INTERVAL=1000ms
-      # 必填：請改為實際 Console HTTPS 基底與憑證（勿提交真實值至版本庫）
-      - VBS_CONSOLE_BASE_URL=${VBS_CONSOLE_BASE_URL}
-      - VBS_CF_ACCESS_CLIENT_ID=${VBS_CF_ACCESS_CLIENT_ID}
-      - VBS_CF_ACCESS_CLIENT_SECRET=${VBS_CF_ACCESS_CLIENT_SECRET}
-      - VBS_SRT_PASSPHRASE=${VBS_SRT_PASSPHRASE}
       - VBS_ROUTE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
       - VBS_ROUTE_SRTLA_INGEST_PORT=20020
       - VBS_ROUTE_SRT_OUTPUT_PORT=20030

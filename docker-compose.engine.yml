@@ -1,4 +1,6 @@
 ﻿# VBS-Engine：需安裝 nvidia-container-toolkit，主機需 NVIDIA 驅動。
+# 必填變數（SRT URI、Console、Cloudflare Access）請寫入同目錄 .env.engine（勿提交版本庫）。
+# 若無 .env.engine，Compose 不會再對缺漏的 ${VAR} 發警告；請仍須建立該檔後再啟動。
 services:
   vbs-engine:
     build:
@@ -6,27 +8,18 @@ services:
       dockerfile: apps/engine/Dockerfile
     network_mode: host
     runtime: nvidia
+    env_file:
+      - path: .env.engine
+        required: false
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
-      # 兩路 SRT（Caller）自 Route 或其他 Listener 拉流，須與實際 URI 一致
-      - VBS_ENGINE_SRT_INPUT_1_URI=${VBS_ENGINE_SRT_INPUT_1_URI}
-      - VBS_ENGINE_SRT_INPUT_2_URI=${VBS_ENGINE_SRT_INPUT_2_URI}
-      # 解析度可調（預設約 480p 寬高）
-      - VBS_ENGINE_MIXER_WIDTH=${VBS_ENGINE_MIXER_WIDTH:-854}
-      - VBS_ENGINE_MIXER_HEIGHT=${VBS_ENGINE_MIXER_HEIGHT:-480}
-      # Brave HTTP/WebRTC 信令（瀏覽器開 http://引擎IP:5000/）
+      - VBS_ENGINE_MIXER_WIDTH=854
+      - VBS_ENGINE_MIXER_HEIGHT=480
       - PORT=5000
       - VBS_ENGINE_API_PORT=5000
-      # 內部 TCP，勿與他服務衝突
-      - VBS_ENGINE_PGM_TCP_PORT=${VBS_ENGINE_PGM_TCP_PORT:-30090}
-      # ffmpeg 輸出之 SRT Caller 完整 URI（含 passphrase 等 query）
-      - VBS_ENGINE_PGM_SRT_URI=${VBS_ENGINE_PGM_SRT_URI}
-      # 可選：遙測（設定 VBS_CONSOLE_BASE_URL 時預設啟用）
-      - VBS_CONSOLE_BASE_URL=${VBS_CONSOLE_BASE_URL}
-      - VBS_CF_ACCESS_CLIENT_ID=${VBS_CF_ACCESS_CLIENT_ID}
-      - VBS_CF_ACCESS_CLIENT_SECRET=${VBS_CF_ACCESS_CLIENT_SECRET}
-      - VBS_ENGINE_TELEMETRY_ENABLED=${VBS_ENGINE_TELEMETRY_ENABLED:-1}
-      - VBS_ENGINE_TELEMETRY_WS_PATH=${VBS_ENGINE_TELEMETRY_WS_PATH:-/vbs/telemetry/ws}
-      - VBS_METRICS_INTERVAL_SEC=${VBS_METRICS_INTERVAL_SEC:-1}
-      - VBS_NODE_ID=${VBS_NODE_ID:-vbs-engine}
+      - VBS_ENGINE_PGM_TCP_PORT=30090
+      - VBS_ENGINE_TELEMETRY_ENABLED=1
+      - VBS_ENGINE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
+      - VBS_METRICS_INTERVAL_SEC=1
+      - VBS_NODE_ID=vbs-engine

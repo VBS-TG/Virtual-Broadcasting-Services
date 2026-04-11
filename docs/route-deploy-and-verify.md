@@ -18,8 +18,8 @@
 
 ### 方式 B：於建置機本地 build
 
-1. 於專案根目錄準備 `.env.route`（變數見 `protocol.md` 與 `docker-compose.route.yml`）。
-2. `docker compose -f docker-compose.route.yml --env-file .env.route up --build -d`
+1. 於專案根目錄準備 `.env.route`（變數見 `protocol.md`；Compose 會自動載入該檔）。
+2. `docker compose -f docker-compose.route.yml up --build -d`
 3. 檢查日誌：應見 `[route][telemetry]` JSON，且 WSS 上報不應持續認證失敗。
 
 ## 健康檢查
