@@ -87,6 +87,8 @@ func (p *Provider) registerWithCFAccess(ctx context.Context) (string, time.Time,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("CF-Access-Client-Id", p.cfg.CFAccessClientID)
 	req.Header.Set("CF-Access-Client-Secret", p.cfg.CFAccessClientSecret)
+	req.Header.Set("X-VBS-Access-Client-Id", p.cfg.CFAccessClientID)
+	req.Header.Set("X-VBS-Access-Client-Secret", p.cfg.CFAccessClientSecret)
 	req.Header.Set("X-VBS-Node-ID", p.cfg.NodeID)
 	resp, err := p.client.Do(req)
 	if err != nil {

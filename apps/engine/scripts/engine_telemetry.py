@@ -74,6 +74,8 @@ def _register_with_cf_access(base_url: str, node_id: str, client_id: str, client
         extra_headers={
             "CF-Access-Client-Id": client_id,
             "CF-Access-Client-Secret": client_secret,
+            "X-VBS-Access-Client-Id": client_id,
+            "X-VBS-Access-Client-Secret": client_secret,
             "X-VBS-Node-ID": node_id,
         },
     )

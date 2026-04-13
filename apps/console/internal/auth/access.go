@@ -67,6 +67,14 @@ func (v *CFAccessVerifier) VerifyRequest(r *http.Request) (*CFAccessIdentity, er
 func (v *CFAccessVerifier) verifyServiceToken(r *http.Request) (*CFAccessIdentity, error) {
 	clientID := strings.TrimSpace(r.Header.Get("CF-Access-Client-Id"))
 	clientSecret := strings.TrimSpace(r.Header.Get("CF-Access-Client-Secret"))
+	// Some zero-trust edges may consume CF-Access-* headers before proxying to origin.
+	// Keep a service-to-service fallback header pair for origin-side verification.
+	if clientID == "" {
+		clientID = strings.TrimSpace(r.Header.Get("X-VBS-Access-Client-Id"))
+	}
+	if clientSecret == "" {
+		clientSecret = strings.TrimSpace(r.Header.Get("X-VBS-Access-Client-Secret"))
+	}
 	if clientID == "" || clientSecret == "" {
 		return nil, fmt.Errorf("missing cf access service token headers")
 	}
