@@ -76,8 +76,10 @@ func (p *Provider) BearerToken(ctx context.Context) (string, error) {
 func (p *Provider) registerWithCFAccess(ctx context.Context) (string, time.Time, error) {
 	endpoint := strings.TrimRight(p.cfg.ConsoleBaseURL, "/") + "/api/v1/auth/register"
 	body := map[string]string{
-		"node_id": p.cfg.NodeID,
-		"role":    "route",
+		"node_id":              p.cfg.NodeID,
+		"role":                 "route",
+		"access_client_id":     p.cfg.CFAccessClientID,
+		"access_client_secret": p.cfg.CFAccessClientSecret,
 	}
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))

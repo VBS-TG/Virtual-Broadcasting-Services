@@ -100,6 +100,13 @@ type tokenResponse struct {
 	ExpiresAt   int64  `json:"expires_at_unix"`
 }
 
+type registerRequest struct {
+	NodeID             string `json:"node_id"`
+	Role               string `json:"role"`
+	AccessClientID     string `json:"access_client_id"`
+	AccessClientSecret string `json:"access_client_secret"`
+}
+
 func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.AdminToken == "" {
 		http.Error(w, `{"error":"admin token not configured"}`, http.StatusServiceUnavailable)
@@ -139,6 +146,28 @@ func (s *Server) handleNodeRegister(w http.ResponseWriter, r *http.Request) {
 	if s.access == nil || s.access.Mode() == "" || s.access.Mode() == "disabled" {
 		http.Error(w, `{"error":"node registration requires Cloudflare Access (VBS_CF_ACCESS_MODE=service_token)"}`, http.StatusServiceUnavailable)
 		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
+	if err != nil {
+		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
+		return
+	}
+	var req registerRequest
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+			return
+		}
+	}
+	// Fallback when edge/proxy strips auth headers: accept same credentials in JSON body.
+	if strings.TrimSpace(r.Header.Get("CF-Access-Client-Id")) == "" && strings.TrimSpace(req.AccessClientID) != "" {
+		r.Header.Set("CF-Access-Client-Id", strings.TrimSpace(req.AccessClientID))
+	}
+	if strings.TrimSpace(r.Header.Get("CF-Access-Client-Secret")) == "" && strings.TrimSpace(req.AccessClientSecret) != "" {
+		r.Header.Set("CF-Access-Client-Secret", strings.TrimSpace(req.AccessClientSecret))
+	}
+	if strings.TrimSpace(r.Header.Get("X-VBS-Node-ID")) == "" && strings.TrimSpace(req.NodeID) != "" {
+		r.Header.Set("X-VBS-Node-ID", strings.TrimSpace(req.NodeID))
 	}
 	identity, err := s.access.VerifyRequest(r)
 	if err != nil {

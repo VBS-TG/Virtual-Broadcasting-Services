@@ -69,7 +69,12 @@ def _register_with_cf_access(base_url: str, node_id: str, client_id: str, client
     endpoint = urljoin(base_url.rstrip("/") + "/", "api/v1/auth/register")
     out = _http_post_json(
         endpoint,
-        {"node_id": node_id, "role": "engine"},
+        {
+            "node_id": node_id,
+            "role": "engine",
+            "access_client_id": client_id,
+            "access_client_secret": client_secret,
+        },
         "",
         extra_headers={
             "CF-Access-Client-Id": client_id,
