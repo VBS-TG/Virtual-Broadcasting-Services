@@ -171,7 +171,18 @@ func (s *Server) handleNodeRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, err := s.access.VerifyRequest(r)
 	if err != nil {
-		log.Printf("[console][auth/register] unauthorized access identity: %v", err)
+		log.Printf(
+			"[console][auth/register] unauthorized access identity: %v remote=%s ua=%q has_cf_id=%t has_cf_secret=%t has_body_id=%t has_body_secret=%t node_id_hdr=%q node_id_body=%q",
+			err,
+			r.RemoteAddr,
+			r.UserAgent(),
+			strings.TrimSpace(r.Header.Get("CF-Access-Client-Id")) != "",
+			strings.TrimSpace(r.Header.Get("CF-Access-Client-Secret")) != "",
+			strings.TrimSpace(req.AccessClientID) != "",
+			strings.TrimSpace(req.AccessClientSecret) != "",
+			strings.TrimSpace(r.Header.Get("X-VBS-Node-ID")),
+			strings.TrimSpace(req.NodeID),
+		)
 		http.Error(w, `{"error":"unauthorized access identity"}`, http.StatusUnauthorized)
 		return
 	}
