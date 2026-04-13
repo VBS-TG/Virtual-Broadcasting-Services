@@ -46,6 +46,11 @@ func Load() (*Config, error) {
 		ttlSec = n
 	}
 	admin := strings.TrimSpace(os.Getenv("VBS_CONSOLE_ADMIN_TOKEN"))
+	accessMode := strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "service_token")))
+	accessClientsRaw := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_CLIENTS"))
+	if accessMode == "service_token" && accessClientsRaw == "" {
+		return nil, fmt.Errorf("VBS_CF_ACCESS_CLIENTS is required when VBS_CF_ACCESS_MODE=service_token")
+	}
 	maxPayload := 255
 	if v := strings.TrimSpace(os.Getenv("VBS_CONSOLE_TELEMETRY_MAX_BYTES")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -60,10 +65,10 @@ func Load() (*Config, error) {
 		JWTTTL:       time.Duration(ttlSec) * time.Second,
 		AdminToken:   admin,
 		TelemetryMax: maxPayload,
-		CFAccessMode:       strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "service_token"))),
+		CFAccessMode:       accessMode,
 		CFAccessTeamDomain: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_TEAM_DOMAIN")),
 		CFAccessAUD:        strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_AUD")),
-		CFAccessClientsRaw: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_CLIENTS")),
+		CFAccessClientsRaw: accessClientsRaw,
 	}, nil
 }
 

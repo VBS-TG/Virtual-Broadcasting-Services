@@ -142,6 +142,7 @@ func (s *Server) handleNodeRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, err := s.access.VerifyRequest(r)
 	if err != nil {
+		log.Printf("[console][auth/register] unauthorized access identity: %v", err)
 		http.Error(w, `{"error":"unauthorized access identity"}`, http.StatusUnauthorized)
 		return
 	}

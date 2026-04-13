@@ -11,6 +11,8 @@ services:
     env_file:
       - path: .env.console
         required: false
+      - path: .env
+        required: false
     environment:
       VBS_CONSOLE_HTTP_BIND: ":4000"
       VBS_CONSOLE_JWT_TTL_SEC: "3600"
