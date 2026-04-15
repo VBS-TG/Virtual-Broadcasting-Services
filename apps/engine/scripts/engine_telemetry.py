@@ -166,6 +166,12 @@ def main() -> None:
                 continue
 
             headers = [f"Authorization: Bearer {auth.token}"]
+            if cf_client_id:
+                headers.append(f"CF-Access-Client-Id: {cf_client_id}")
+                headers.append(f"X-VBS-Access-Client-Id: {cf_client_id}")
+            if cf_client_secret:
+                headers.append(f"CF-Access-Client-Secret: {cf_client_secret}")
+                headers.append(f"X-VBS-Access-Client-Secret: {cf_client_secret}")
             ws = websocket.create_connection(ws_url, timeout=8, header=headers, sslopt=sslopt)
             try:
                 ws.send(raw.decode("utf-8"))
