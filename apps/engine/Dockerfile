@@ -44,10 +44,12 @@ RUN python3 -m venv --system-site-packages .venv \
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/engine_telemetry.py /opt/vbs-engine/scripts/engine_telemetry.py
+COPY apps/engine/scripts/sitecustomize.py /opt/brave/sitecustomize.py
 COPY apps/engine/scripts/entrypoint.sh /opt/vbs-engine/scripts/entrypoint.sh
 RUN sed -i '1s/^\xEF\xBB\xBF//' /opt/vbs-engine/scripts/entrypoint.sh \
     && sed -i '1s/^\xEF\xBB\xBF//' /opt/vbs-engine/scripts/engine_telemetry.py \
     && sed -i '1s/^\xEF\xBB\xBF//' /opt/vbs-engine/scripts/generate_brave_config.py \
+    && sed -i '1s/^\xEF\xBB\xBF//' /opt/brave/sitecustomize.py \
     && chmod +x /opt/vbs-engine/scripts/entrypoint.sh
 
 WORKDIR /opt/brave
