@@ -9,7 +9,17 @@ ENV LANG=C.UTF-8
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=all
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN printf "%s\n" \
+    "Acquire::Retries \"5\";" \
+    "Acquire::http::Timeout \"30\";" \
+    "Acquire::https::Timeout \"30\";" \
+    > /etc/apt/apt.conf.d/99vbs-retry \
+    && sed -i \
+      -e 's|http://archive.ubuntu.com/ubuntu|http://free.nchc.org.tw/ubuntu|g' \
+      -e 's|http://security.ubuntu.com/ubuntu|http://free.nchc.org.tw/ubuntu|g' \
+      /etc/apt/sources.list \
+    && apt-get -o Acquire::ForceIPv4=true update \
+    && apt-get install -y --no-install-recommends \
     ca-certificates curl git \
     build-essential \
     python3 python3-pip python3-venv python3-dev python3-gi python3-gst-1.0 \
