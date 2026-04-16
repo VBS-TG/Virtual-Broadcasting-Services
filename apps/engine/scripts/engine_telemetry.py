@@ -52,6 +52,8 @@ def _ws_url(base_url: str, path: str) -> str:
 
 def _http_post_json(url: str, body: dict, bearer: str, timeout_sec: int = 8, extra_headers: dict | None = None) -> dict:
     req = urllib.request.Request(url, method="POST")
+    # 固定使用自訂 UA，避免被邊緣/防火牆以 Python-urllib 預設 UA 擋掉
+    req.add_header("User-Agent", "VBS-Engine/1.0")
     req.add_header("Content-Type", "application/json")
     if bearer:
         req.add_header("Authorization", f"Bearer {bearer}")
