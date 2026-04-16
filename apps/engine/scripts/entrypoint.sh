@@ -37,18 +37,17 @@ for _ in $(seq 1 120); do
 done
 
 if ! ss -tln 2>/dev/null | grep -q ":${TCP_PORT}"; then
-  echo "錯誤: 等待 TCP ${TCP_PORT} 逾時" >&2
-  exit 1
+  echo "[vbs-engine] 警告: 等待 TCP ${TCP_PORT} 逾時，略過 ffmpeg PGM（僅啟動 telemetry，如有設定）" >&2
+else
+  echo "[vbs-engine] 啟動 ffmpeg → SRT PGM…"
+  ffmpeg -hide_banner -loglevel info \
+    -fflags +genpts \
+    -i "tcp://127.0.0.1:${TCP_PORT}?timeout=0" \
+    -c copy \
+    -f mpegts \
+    "${VBS_ENGINE_PGM_SRT_URI}" &
+  FF_PID=$!
 fi
-
-echo "[vbs-engine] 啟動 ffmpeg → SRT PGM…"
-ffmpeg -hide_banner -loglevel info \
-  -fflags +genpts \
-  -i "tcp://127.0.0.1:${TCP_PORT}?timeout=0" \
-  -c copy \
-  -f mpegts \
-  "${VBS_ENGINE_PGM_SRT_URI}" &
-FF_PID=$!
 
 if [[ -n "${VBS_CONSOLE_BASE_URL:-}" && "${VBS_ENGINE_TELEMETRY_ENABLED:-1}" != "0" ]]; then
   echo "[vbs-engine] 啟動 telemetry → Console…"
@@ -56,5 +55,5 @@ if [[ -n "${VBS_CONSOLE_BASE_URL:-}" && "${VBS_ENGINE_TELEMETRY_ENABLED:-1}" != 
   TELEMETRY_PID=$!
 fi
 
-wait "$BRAVE_PID" "$FF_PID" "${TELEMETRY_PID:-}"
+wait "$BRAVE_PID" ${FF_PID:+$FF_PID} "${TELEMETRY_PID:-}"
 
