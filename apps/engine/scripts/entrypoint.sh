@@ -18,6 +18,17 @@ python3 /opt/vbs-engine/scripts/generate_brave_config.py
 
 cd /opt/brave
 
+# Runtime guard: patch legacy sanic imports for Python 3.10+ in case image cache
+# or external layer differences skip build-time patching.
+if [[ -f "/opt/brave/.venv/lib/python3.10/site-packages/sanic/blueprint_group.py" ]]; then
+  sed -i "s/from collections import MutableSequence/from collections.abc import MutableSequence/g" \
+    /opt/brave/.venv/lib/python3.10/site-packages/sanic/blueprint_group.py || true
+  find /opt/brave/.venv/lib/python3.10/site-packages/sanic -type f -name "*.py" -print0 \
+    | xargs -0 sed -i "s/from collections import Mapping/from collections.abc import Mapping/g" || true
+  find /opt/brave/.venv/lib/python3.10/site-packages/sanic -type f -name "*.py" -print0 \
+    | xargs -0 sed -i "s/from collections import MutableMapping/from collections.abc import MutableMapping/g" || true
+fi
+
 cleanup() {
   [[ -n "${BRAVE_PID:-}" ]] && kill "$BRAVE_PID" 2>/dev/null || true
   [[ -n "${FF_PID:-}" ]] && kill "$FF_PID" 2>/dev/null || true
