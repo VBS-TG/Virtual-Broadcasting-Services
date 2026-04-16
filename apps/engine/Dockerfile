@@ -1,7 +1,7 @@
 ﻿# VBS-Engine：BBC Brave + GStreamer + NVIDIA runtime（linux/amd64）
 # 參考：https://github.com/bbc/brave
 
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.2.0-runtime-ubuntu20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LC_ALL=C.UTF-8
@@ -43,7 +43,16 @@ RUN python3 -m venv --system-site-packages .venv \
          'websocket-client>=1.6,<2' \
     && .venv/bin/python - <<'PY' \
 import pathlib
-root = pathlib.Path('/opt/brave/.venv/lib/python3.10/site-packages/sanic')
+import site
+sanic_root = None
+for p in site.getsitepackages():
+    cand = pathlib.Path(p) / 'sanic'
+    if cand.exists():
+        sanic_root = cand
+        break
+if sanic_root is None:
+    raise SystemExit('sanic package path not found')
+root = sanic_root
 for p in root.rglob('*.py'):
     s = p.read_text(encoding='utf-8')
     ns = s.replace('from collections import MutableSequence', 'from collections.abc import MutableSequence')
@@ -52,6 +61,11 @@ for p in root.rglob('*.py'):
     if ns != s:
         p.write_text(ns, encoding='utf-8')
 print('patched sanic collection imports')
+for p in root.rglob('*.py'):
+    s = p.read_text(encoding='utf-8')
+    if 'from collections import MutableSequence' in s:
+        raise SystemExit(f'legacy import still present: {p}')
+print('verified sanic legacy imports removed')
 PY
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
