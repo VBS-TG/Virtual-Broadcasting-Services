@@ -42,7 +42,7 @@ RUN git clone --depth 1 https://github.com/bbc/brave.git . \
 
 # 勿安裝 gbulb：其依賴會拉 PyPI pygobject 並從原始碼編譯，與 apt 的 python3-gi 衝突。
 # sanic 鎖 19.3.1（與 Brave 相容）；uvloop 為 brave/api 直接 import。
-# 注意：Ubuntu 20.04 內建 Python 3.8，uvloop 0.21+ 可能已不支援 3.8，故上限 <0.21。
+# Ubuntu 20.04 / Python 3.8 線上，無須額外 patch collections 匯入。
 RUN python3 -m venv --system-site-packages .venv \
     && .venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
     && .venv/bin/pip install --no-cache-dir \
@@ -51,33 +51,7 @@ RUN python3 -m venv --system-site-packages .venv \
          'uvloop>=0.17,<0.21' \
          'pillow>=9.5,<12' \
          'psutil>=5.6,<6' \
-         'websocket-client>=1.6,<2' \
-    && .venv/bin/python - <<'PY' \
-import pathlib
-import site
-sanic_root = None
-for p in site.getsitepackages():
-    cand = pathlib.Path(p) / 'sanic'
-    if cand.exists():
-        sanic_root = cand
-        break
-if sanic_root is None:
-    raise SystemExit('sanic package path not found')
-root = sanic_root
-for p in root.rglob('*.py'):
-    s = p.read_text(encoding='utf-8')
-    ns = s.replace('from collections import MutableSequence', 'from collections.abc import MutableSequence')
-    ns = ns.replace('from collections import Mapping', 'from collections.abc import Mapping')
-    ns = ns.replace('from collections import MutableMapping', 'from collections.abc import MutableMapping')
-    if ns != s:
-        p.write_text(ns, encoding='utf-8')
-print('patched sanic collection imports')
-for p in root.rglob('*.py'):
-    s = p.read_text(encoding='utf-8')
-    if 'from collections import MutableSequence' in s:
-        raise SystemExit(f'legacy import still present: {p}')
-print('verified sanic legacy imports removed')
-PY
+         'websocket-client>=1.6,<2'
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/engine_telemetry.py /opt/vbs-engine/scripts/engine_telemetry.py
