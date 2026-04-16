@@ -12,17 +12,13 @@ import (
 	"vbs/apps/route/internal/system"
 )
 
-// Metrics 為 Route 節點上報 Console 之 JSON 欄位（單筆 ≤255 bytes）。
-type Metrics struct {
-	NodeID string `json:"node_id"`
-
-	CPUPercent float64 `json:"cpu_percent"`
-	MemBytes   uint64  `json:"mem_bytes"`
-
-	TotalIngestMbps float64 `json:"total_ingest_mbps"`
-	ReorderErrorPct float64 `json:"reorder_error_pct"`
-
-	HasEngineClient bool `json:"has_engine_client"`
+// TelemetryPayload aligns with console telemetry.v1 envelope.
+type TelemetryPayload struct {
+	NodeID   string                 `json:"node_id"`
+	NodeType string                 `json:"node_type"`
+	TsMs     int64                  `json:"ts_ms"`
+	Metrics  map[string]interface{} `json:"metrics"`
+	AuthMode string                 `json:"auth_mode,omitempty"`
 }
 
 // StartReporter 以 MetricsInterval 週期取樣、送 WSS、並寫入結構化日誌；可選觸發管線重啟。
@@ -76,7 +72,7 @@ func StartReporter(ctx context.Context, cfg config.Config, logger *log.Logger, p
 	}
 }
 
-func collectMetrics(cfg config.Config, ingestMbps float64, s srtla.Stats) Metrics {
+func collectMetrics(cfg config.Config, ingestMbps float64, s srtla.Stats) TelemetryPayload {
 	cpuPct := 0.0
 	if v, err := system.HostCPUPercent(); err == nil {
 		cpuPct = v
@@ -96,13 +92,18 @@ func collectMetrics(cfg config.Config, ingestMbps float64, s srtla.Stats) Metric
 		hasEngineClient = true
 	}
 
-	return Metrics{
-		NodeID:          cfg.NodeID,
-		CPUPercent:      round2(cpuPct),
-		MemBytes:        memUsed,
-		TotalIngestMbps: ingestMbps,
-		ReorderErrorPct: reorderErrPct,
-		HasEngineClient: hasEngineClient,
+	return TelemetryPayload{
+		NodeID:   cfg.NodeID,
+		NodeType: "route",
+		TsMs:     time.Now().UnixMilli(),
+		Metrics: map[string]interface{}{
+			"cpu_percent":       round2(cpuPct),
+			"mem_bytes":         memUsed,
+			"total_ingest_mbps": ingestMbps,
+			"reorder_error_pct": reorderErrPct,
+			"has_engine_client": hasEngineClient,
+		},
+		AuthMode: "bearer",
 	}
 }
 
