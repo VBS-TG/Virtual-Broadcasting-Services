@@ -40,7 +40,19 @@ RUN python3 -m venv --system-site-packages .venv \
          'uvloop>=0.21,<0.23' \
          'pillow>=9.5,<12' \
          'psutil>=5.6,<6' \
-         'websocket-client>=1.6,<2'
+         'websocket-client>=1.6,<2' \
+    && .venv/bin/python - <<'PY' \
+import pathlib
+root = pathlib.Path('/opt/brave/.venv/lib/python3.10/site-packages/sanic')
+for p in root.rglob('*.py'):
+    s = p.read_text(encoding='utf-8')
+    ns = s.replace('from collections import MutableSequence', 'from collections.abc import MutableSequence')
+    ns = ns.replace('from collections import Mapping', 'from collections.abc import Mapping')
+    ns = ns.replace('from collections import MutableMapping', 'from collections.abc import MutableMapping')
+    if ns != s:
+        p.write_text(ns, encoding='utf-8')
+print('patched sanic collection imports')
+PY
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/engine_telemetry.py /opt/vbs-engine/scripts/engine_telemetry.py
