@@ -42,9 +42,8 @@ RUN git clone --depth 1 https://github.com/bbc/brave.git . \
 
 # 勿安裝 gbulb：其依賴會拉 PyPI pygobject 並從原始碼編譯，與 apt 的 python3-gi 衝突。
 # sanic 鎖 19.3.1（與 Brave 相容）；uvloop 為 brave/api 直接 import。
-# Ubuntu 20.04 / Python 3.8 線上，無須額外 patch collections 匯入。
+# Ubuntu 20.04 / Python 3.8 線上，沿用系統相容的 pip/setuptools 版本，避免舊套件 metadata 相容性問題。
 RUN python3 -m venv --system-site-packages .venv \
-    && .venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
     && .venv/bin/pip install --no-cache-dir \
          'pyyaml>=5.1,<7' \
          'sanic==19.3.1' \
