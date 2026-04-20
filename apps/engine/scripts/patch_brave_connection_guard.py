@@ -131,27 +131,6 @@ def patch_connection_to_mixer_py() -> None:
         raise SystemExit("patch_brave_connection_guard: _create_audio_elements snippet not found")
     text = text.replace(old_audio, new_audio, 1)
 
-    old_ensure = (
-        "    def _ensure_elements_are_created(self):\n"
-        "        # STEP 1: Connect the source to the destination, unless that's already been done\n"
-        "        if self.has_video() and not hasattr(self, 'video_is_linked'):\n"
-        "            self._create_video_elements()\n"
-        "        if self.has_audio() and not hasattr(self, 'audio_is_linked'):\n"
-        "            self._create_audio_elements()\n"
-        "\n"
-        "        # STEP 2: Get the new elements in the same state as their pipelines:\n"
-        "        self._sync_element_states()\n"
-        "\n"
-        "        # STEP 3: Connect the input's tee to these new elements\n"
-        "        # (It's important we don't do this earlier, as if the elements were not\n"
-        "        # ready we could disrupt the existing pipeline.)\n"
-        "        if self.has_video() and not hasattr(self, 'video_is_linked'):\n"
-        "            self._connect_tee_to_intersink('video')\n"
-        "            self.video_is_linked = True\n"
-        "        if self.has_audio() and not hasattr(self, 'audio_is_linked'):\n"
-        "            self._connect_tee_to_intersink('audio')\n"
-        "            self.audio_is_linked = True\n"
-    )
     new_ensure = (
         "    def _ensure_elements_are_created(self):\n"
         "        # STEP 1: Connect the source to the destination, unless that's already been done\n"
@@ -174,10 +153,17 @@ def patch_connection_to_mixer_py() -> None:
         "        if self.has_audio() and not hasattr(self, 'audio_is_linked') and audio_created:\n"
         "            self._connect_tee_to_intersink('audio')\n"
         "            self.audio_is_linked = True\n"
+        "\n"
+        "        # If source and destination have already started, we need to unblock straightaway:\n"
+        "        self.unblock_intersrc_if_ready()\n"
     )
-    if old_ensure not in text:
-        raise SystemExit("patch_brave_connection_guard: _ensure_elements_are_created snippet not found")
-    text = text.replace(old_ensure, new_ensure, 1)
+    ensure_start = "    def _ensure_elements_are_created(self):\n"
+    ensure_end = "    def _create_video_elements(self):\n"
+    s = text.find(ensure_start)
+    e = text.find(ensure_end)
+    if s == -1 or e == -1 or e <= s:
+        raise SystemExit("patch_brave_connection_guard: _ensure_elements_are_created boundaries not found")
+    text = text[:s] + new_ensure + "\n" + text[e:]
 
     path.write_text(text, encoding="utf-8")
 
