@@ -181,7 +181,15 @@ def main() -> None:
                 ws.close()
             time.sleep(interval)
         except Exception as exc:  # pylint: disable=broad-except
-            print(f"[engine][telemetry] send failed: {exc}")
+            msg = str(exc)
+            # Token may be revoked or no longer accepted by Console/Access even before exp.
+            # Force re-register on next loop instead of reusing a stale bearer forever.
+            if "401" in msg or "403" in msg:
+                auth.token = ""
+                auth.exp_unix = 0
+                print(f"[engine][telemetry] auth rejected ({msg}); will re-register token")
+            else:
+                print(f"[engine][telemetry] send failed: {exc}")
             time.sleep(min(5.0, interval + 1.0))
 
 
