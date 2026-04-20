@@ -8,6 +8,8 @@ ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=all
+# Brave 透過 GI 載入 Gst；須讓登錄檔掃到 gst-plugins-bad（intervideosink/interaudiosink）。
+ENV GST_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/gstreamer-1.0
 
 RUN printf "%s\n" \
     "Acquire::Retries \"5\";" \
@@ -57,6 +59,9 @@ RUN python3 -m venv --system-site-packages .venv \
          'pillow>=9.5,<12' \
          'psutil>=5.6,<6' \
          'websocket-client>=1.6,<2'
+
+# 與執行期 Brave 相同方式驗證 inter 元件可被建立（避免僅 gst-inspect 通過但 GI 失敗）。
+RUN cd /opt/brave && GST_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 .venv/bin/python -c "import gi; gi.require_version('Gst','1.0'); from gi.repository import Gst; Gst.init(None); m=[f for f in ('intervideosink','intervideosrc','queue') if Gst.ElementFactory.make(f,'p') is None]; m and __import__('sys').exit('Gst.ElementFactory missing: ' + str(m))"
 
 COPY apps/engine/scripts/generate_brave_config.py /opt/vbs-engine/scripts/generate_brave_config.py
 COPY apps/engine/scripts/engine_telemetry.py /opt/vbs-engine/scripts/engine_telemetry.py

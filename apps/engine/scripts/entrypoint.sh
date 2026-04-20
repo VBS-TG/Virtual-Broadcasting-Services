@@ -16,9 +16,32 @@ fi
 export PORT="${PORT:-${VBS_ENGINE_API_PORT:-5000}}"
 TCP_PORT="${VBS_ENGINE_PGM_TCP_PORT:-30090}"
 
+# GStreamer：確保 Brave 使用的 Gst 登錄檔掃到 plugins-bad（intervideosink）；映像為 amd64。
+for _gstplug in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 /usr/lib/aarch64-linux-gnu/gstreamer-1.0; do
+  if [[ -d "${_gstplug}" ]]; then
+    export GST_PLUGIN_PATH="${_gstplug}${GST_PLUGIN_PATH:+:${GST_PLUGIN_PATH}}"
+    break
+  fi
+done
+
 python3 /opt/vbs-engine/scripts/generate_brave_config.py
 
 cd /opt/brave
+
+if ! gst-inspect-1.0 intervideosink >/dev/null 2>&1; then
+  echo "[vbs-engine] 錯誤: gst-inspect 找不到 intervideosink（缺 gstreamer1.0-plugins-bad 或 GST_PLUGIN_PATH）。GST_PLUGIN_PATH=${GST_PLUGIN_PATH:-}" >&2
+  exit 1
+fi
+if ! GST_PLUGIN_PATH="${GST_PLUGIN_PATH:-}" .venv/bin/python -c "
+import gi
+gi.require_version('Gst','1.0')
+from gi.repository import Gst
+Gst.init(None)
+assert Gst.ElementFactory.make('intervideosink','probe') is not None
+"; then
+  echo "[vbs-engine] 錯誤: Python/GI 無法建立 intervideosink（請確認映像已 docker build --no-cache）。" >&2
+  exit 1
+fi
 
 cleanup() {
   [[ -n "${BRAVE_PID:-}" ]] && kill "$BRAVE_PID" 2>/dev/null || true
