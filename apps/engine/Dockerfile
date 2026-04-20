@@ -29,6 +29,10 @@ RUN printf "%s\n" \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-nice \
     ffmpeg iproute2 \
+    && gst-inspect-1.0 intervideosink >/dev/null \
+    && gst-inspect-1.0 intervideosrc >/dev/null \
+    && gst-inspect-1.0 x264enc >/dev/null \
+    && gst-inspect-1.0 mpegtsmux >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --no-cache-dir pyyaml
@@ -38,7 +42,9 @@ COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_br
 # Brave Pipfile 含 vext / pip 版 pygobject 等；改以 pip 安裝並保留 system-site-packages 給 apt 的 python3-gi。
 # python3-venv：否則 `python3 -m venv` 在最小映像會失敗（需與 python3 一併安裝）。
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
-    && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py
+    && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py \
+    && sed -i 's/has_mux = config\.enable_video$/has_mux = config.enable_video()/' brave/outputs/tcp.py \
+    && grep -q 'has_mux = config.enable_video()' brave/outputs/tcp.py
 
 # 勿安裝 gbulb：其依賴會拉 PyPI pygobject 並從原始碼編譯，與 apt 的 python3-gi 衝突。
 # sanic 鎖 19.3.1（與 Brave 相容）；uvloop 為 brave/api 直接 import。
