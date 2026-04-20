@@ -30,7 +30,7 @@ RUN printf "%s\n" \
     libjpeg-dev zlib1g-dev libopenjp2-7-dev libtiff5-dev libfreetype6-dev \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-nice \
-    ffmpeg iproute2 \
+    ffmpeg iproute2 srt-tools \
     && gst-inspect-1.0 intervideosink >/dev/null \
     && gst-inspect-1.0 intervideosrc >/dev/null \
     && gst-inspect-1.0 x264enc >/dev/null \

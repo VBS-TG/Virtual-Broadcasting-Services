@@ -66,14 +66,22 @@ done
 if ! ss -tln 2>/dev/null | grep -q ":${TCP_PORT}"; then
   echo "[vbs-engine] 警告: 等待 TCP ${TCP_PORT} 逾時（${WAIT_SEC}s），略過 ffmpeg PGM（僅啟動 telemetry，如有設定）。可調高 VBS_ENGINE_PGM_TCP_WAIT_SEC 或檢查 Brave 日誌／輸入源是否就緒。" >&2
 else
-  echo "[vbs-engine] 啟動 ffmpeg → SRT PGM…"
-  ffmpeg -hide_banner -loglevel info \
-    -fflags +genpts \
-    -i "tcp://127.0.0.1:${TCP_PORT}?timeout=0" \
-    -c copy \
-    -f mpegts \
-    "${VBS_ENGINE_PGM_SRT_URI}" &
-  FF_PID=$!
+  if ffmpeg -hide_banner -protocols 2>/dev/null | grep -qE '(^|[[:space:]])srt($|[[:space:]])'; then
+    echo "[vbs-engine] 啟動 ffmpeg → SRT PGM…"
+    ffmpeg -hide_banner -loglevel info \
+      -fflags +genpts \
+      -i "tcp://127.0.0.1:${TCP_PORT}?timeout=0" \
+      -c copy \
+      -f mpegts \
+      "${VBS_ENGINE_PGM_SRT_URI}" &
+    FF_PID=$!
+  elif command -v srt-live-transmit >/dev/null 2>&1; then
+    echo "[vbs-engine] ffmpeg 不支援 SRT，改用 srt-live-transmit 轉送 PGM…"
+    srt-live-transmit "tcp://127.0.0.1:${TCP_PORT}" "${VBS_ENGINE_PGM_SRT_URI}" &
+    FF_PID=$!
+  else
+    echo "[vbs-engine] 錯誤: ffmpeg 無 SRT 協定且系統無 srt-live-transmit，無法推送 VBS_ENGINE_PGM_SRT_URI" >&2
+  fi
 fi
 
 if [[ -n "${VBS_CONSOLE_BASE_URL:-}" && "${VBS_ENGINE_TELEMETRY_ENABLED:-1}" != "0" ]]; then
