@@ -131,6 +131,59 @@ def patch_connection_to_mixer_py() -> None:
         raise SystemExit("patch_brave_connection_guard: _create_audio_elements snippet not found")
     text = text.replace(old_audio, new_audio, 1)
 
+    add_to_mix_start = "    def _add_to_mix(self, audio_or_video):\n"
+    add_to_mix_end = "    def _handle_video_mix_props(self):\n"
+    old_add_to_mix = (
+        "    def _add_to_mix(self, audio_or_video):\n"
+        "        if audio_or_video not in self._mix_request_pad:\n"
+        "            # We need to conect the tee to the destination. This is the pad of the tee:\n"
+        "            tee_pad = self._get_or_create_tee_pad(audio_or_video)\n"
+        "            self._mix_request_pad[audio_or_video] = self.dest.get_new_pad_for_source(audio_or_video)\n"
+        "\n"
+        "            link_response = tee_pad.link(self._mix_request_pad[audio_or_video])\n"
+        "            if link_response != Gst.PadLinkReturn.OK:\n"
+        "                self.logger.error('Cannot link %s to mix, response was %s' % (audio_or_video, link_response))\n"
+        "\n"
+        "        if audio_or_video == 'audio':\n"
+        "            self._handle_audio_mix_props()\n"
+        "        else:\n"
+        "            self._handle_video_mix_props()\n"
+    )
+    new_add_to_mix = (
+        "    def _add_to_mix(self, audio_or_video):\n"
+        "        if audio_or_video not in self._tee:\n"
+        "            self.logger.error('Skipping %s mix: tee is unavailable' % audio_or_video)\n"
+        "            return\n"
+        "        if audio_or_video not in self._mix_request_pad:\n"
+        "            # We need to conect the tee to the destination. This is the pad of the tee:\n"
+        "            tee_pad = self._get_or_create_tee_pad(audio_or_video)\n"
+        "            if tee_pad is None:\n"
+        "                self.logger.error('Skipping %s mix: tee pad unavailable' % audio_or_video)\n"
+        "                return\n"
+        "            self._mix_request_pad[audio_or_video] = self.dest.get_new_pad_for_source(audio_or_video)\n"
+        "            if self._mix_request_pad[audio_or_video] is None:\n"
+        "                self.logger.error('Skipping %s mix: destination pad unavailable' % audio_or_video)\n"
+        "                return\n"
+        "\n"
+        "            link_response = tee_pad.link(self._mix_request_pad[audio_or_video])\n"
+        "            if link_response != Gst.PadLinkReturn.OK:\n"
+        "                self.logger.error('Cannot link %s to mix, response was %s' % (audio_or_video, link_response))\n"
+        "                return\n"
+        "\n"
+        "        if audio_or_video == 'audio':\n"
+        "            self._handle_audio_mix_props()\n"
+        "        else:\n"
+        "            self._handle_video_mix_props()\n"
+    )
+    s_add = text.find(add_to_mix_start)
+    e_add = text.find(add_to_mix_end)
+    if s_add == -1 or e_add == -1 or e_add <= s_add:
+        raise SystemExit("patch_brave_connection_guard: _add_to_mix boundaries not found")
+    # Only patch if method still resembles upstream body.
+    current_add = text[s_add:e_add]
+    if "Skipping %s mix: tee is unavailable" not in current_add:
+        text = text[:s_add] + new_add_to_mix + "\n" + text[e_add:]
+
     new_ensure = (
         "    def _ensure_elements_are_created(self):\n"
         "        # STEP 1: Connect the source to the destination, unless that's already been done\n"
