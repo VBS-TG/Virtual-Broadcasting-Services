@@ -41,12 +41,15 @@ RUN pip3 install --no-cache-dir pyyaml
 
 WORKDIR /opt/brave
 COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_brave_pipfile.py
+COPY apps/engine/scripts/patch_brave_session.py /opt/vbs-engine/scripts/patch_brave_session.py
 # Brave Pipfile 含 vext / pip 版 pygobject 等；改以 pip 安裝並保留 system-site-packages 給 apt 的 python3-gi。
 # python3-venv：否則 `python3 -m venv` 在最小映像會失敗（需與 python3 一併安裝）。
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
     && python3 /opt/vbs-engine/scripts/patch_brave_pipfile.py \
     && sed -i 's/has_mux = config\.enable_video$/has_mux = config.enable_video()/' brave/outputs/tcp.py \
-    && grep -q 'has_mux = config.enable_video()' brave/outputs/tcp.py
+    && grep -q 'has_mux = config.enable_video()' brave/outputs/tcp.py \
+    && python3 /opt/vbs-engine/scripts/patch_brave_session.py \
+    && grep -q 'inp._consider_changing_state' brave/session.py
 
 # 勿安裝 gbulb：其依賴會拉 PyPI pygobject 並從原始碼編譯，與 apt 的 python3-gi 衝突。
 # sanic 鎖 19.3.1（與 Brave 相容）；uvloop 為 brave/api 直接 import。
