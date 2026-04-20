@@ -75,12 +75,15 @@ else
       -f mpegts \
       "${VBS_ENGINE_PGM_SRT_URI}" &
     FF_PID=$!
-  elif command -v srt-live-transmit >/dev/null 2>&1; then
-    echo "[vbs-engine] ffmpeg 不支援 SRT，改用 srt-live-transmit 轉送 PGM…"
-    srt-live-transmit "tcp://127.0.0.1:${TCP_PORT}" "${VBS_ENGINE_PGM_SRT_URI}" &
+  elif command -v gst-launch-1.0 >/dev/null 2>&1; then
+    echo "[vbs-engine] ffmpeg 不支援 SRT，改用 GStreamer srtsink 轉送 PGM…"
+    gst-launch-1.0 -q \
+      tcpclientsrc host=127.0.0.1 port="${TCP_PORT}" \
+      ! queue \
+      ! srtsink uri="${VBS_ENGINE_PGM_SRT_URI}" &
     FF_PID=$!
   else
-    echo "[vbs-engine] 錯誤: ffmpeg 無 SRT 協定且系統無 srt-live-transmit，無法推送 VBS_ENGINE_PGM_SRT_URI" >&2
+    echo "[vbs-engine] 錯誤: ffmpeg 無 SRT 協定且系統無 gst-launch-1.0，無法推送 VBS_ENGINE_PGM_SRT_URI" >&2
   fi
 fi
 
