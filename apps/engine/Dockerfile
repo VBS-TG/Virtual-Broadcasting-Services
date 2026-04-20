@@ -44,6 +44,7 @@ COPY apps/engine/scripts/patch_brave_pipfile.py /opt/vbs-engine/scripts/patch_br
 COPY apps/engine/scripts/patch_brave_session.py /opt/vbs-engine/scripts/patch_brave_session.py
 COPY apps/engine/scripts/patch_brave_uri.py /opt/vbs-engine/scripts/patch_brave_uri.py
 COPY apps/engine/scripts/patch_brave_input_add.py /opt/vbs-engine/scripts/patch_brave_input_add.py
+COPY apps/engine/scripts/patch_brave_connection_guard.py /opt/vbs-engine/scripts/patch_brave_connection_guard.py
 # Brave Pipfile 含 vext / pip 版 pygobject 等；改以 pip 安裝並保留 system-site-packages 給 apt 的 python3-gi。
 # python3-venv：否則 `python3 -m venv` 在最小映像會失敗（需與 python3 一併安裝）。
 RUN git clone --depth 1 https://github.com/bbc/brave.git . \
@@ -55,7 +56,10 @@ RUN git clone --depth 1 https://github.com/bbc/brave.git . \
     && python3 /opt/vbs-engine/scripts/patch_brave_uri.py \
     && grep -q "playbin_element = 'playbin' if (is_rtmp or is_srt) else 'playbin3'" brave/inputs/uri.py \
     && python3 /opt/vbs-engine/scripts/patch_brave_input_add.py \
-    && grep -q "Unable to add element %s to input bin; retrying in READY state" brave/inputs/input.py
+    && grep -q "Unable to add element %s to input bin; retrying in READY state" brave/inputs/input.py \
+    && python3 /opt/vbs-engine/scripts/patch_brave_connection_guard.py \
+    && grep -q "Failed to create inter elements for %s" brave/connections/connection.py \
+    && grep -q "video_created = self._create_video_elements()" brave/connections/connection_to_mixer.py
 
 # 勿安裝 gbulb：其依賴會拉 PyPI pygobject 並從原始碼編譯，與 apt 的 python3-gi 衝突。
 # sanic 鎖 19.3.1（與 Brave 相容）；uvloop 為 brave/api 直接 import。
