@@ -45,7 +45,7 @@ def main() -> None:
     tcp_port = int(os.environ.get("VBS_ENGINE_PGM_TCP_PORT", "30090"))
 
     api_port = int(os.environ.get("PORT", os.environ.get("VBS_ENGINE_API_PORT", "5000")))
-    enable_webrtc = _env_truthy("VBS_ENGINE_BRAVE_ENABLE_WEBRTC", False)
+    enable_webrtc = _env_truthy("VBS_ENGINE_BRAVE_ENABLE_WEBRTC", True)
 
     outputs = [
         {

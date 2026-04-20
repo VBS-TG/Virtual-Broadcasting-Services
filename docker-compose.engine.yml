@@ -17,8 +17,8 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
       - VBS_ENGINE_MIXER_WIDTH=854
       - VBS_ENGINE_MIXER_HEIGHT=480
-      # PGM：預設僅 TCPmpeg（ffmpeg→SRT）；Brave WebRTC 需 VBS_ENGINE_BRAVE_ENABLE_WEBRTC=1
-      # - VBS_ENGINE_BRAVE_ENABLE_WEBRTC=1
+      # Brave 預設同時啟用 WebRTC 與 TCP(PGM→ffmpeg→SRT)。僅在要關閉 WebRTC 時設 VBS_ENGINE_BRAVE_ENABLE_WEBRTC=0
+      # - VBS_ENGINE_BRAVE_ENABLE_WEBRTC=0
       # - VBS_ENGINE_BRAVE_ENABLE_AUDIO=0   # PGM 若僅需視訊可關閉 Brave 音訊管線（除錯／相容）
       # - VBS_ENGINE_USE_TEST_SOURCES=1     # 不依賴 SRT 入（兩路彩條）；仍須設定 VBS_ENGINE_PGM_SRT_URI
       # - VBS_ENGINE_PGM_TCP_WAIT_SEC=240   # 等待 Brave 於本機監聽 PGM TCP（預設 240）
