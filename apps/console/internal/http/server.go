@@ -7,9 +7,11 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -70,6 +72,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vbs/telemetry/ws", s.handleTelemetryWS)
 	s.mux.HandleFunc("GET /api/v1/telemetry/latest", s.handleTelemetryLatest)
 	s.mux.HandleFunc("POST /api/v1/stream/session-key", s.handleSessionKey)
+	s.mux.HandleFunc("POST /api/v1/pgm/session", s.handlePGMSession)
+	s.mux.HandleFunc("POST /api/v1/pgm/route-buffer", s.handlePGMRouteBuffer)
 }
 
 // ListenAndServe starts the HTTP server.
@@ -345,4 +349,105 @@ func trimErr(err error) string {
 		s = s[:200]
 	}
 	return s
+}
+
+type pgmSessionResponse struct {
+	StreamUUID      string `json:"stream_uuid"`
+	PublishStreamID string `json:"publish_streamid"`
+	ReadStreamID    string `json:"read_streamid"`
+	PlaybackSRTURL  string `json:"playback_srt_url"`
+	RelayHost       string `json:"relay_host,omitempty"`
+}
+
+func (s *Server) handlePGMSession(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if s.cfg.RouteControlBaseURL == "" {
+		http.Error(w, `{"error":"VBS_ROUTE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	respBody, status, err := s.routeControlPOST("/api/v1/route/pgm/session", []byte(`{}`))
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"route pgm session proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
+		return
+	}
+	if status >= 400 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write(respBody)
+		return
+	}
+	var out pgmSessionResponse
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		http.Error(w, `{"error":"invalid route session payload"}`, http.StatusBadGateway)
+		return
+	}
+	if out.PlaybackSRTURL != "" && s.cfg.PGMDefaultLatencyMs > 0 {
+		if u, err := url.Parse(out.PlaybackSRTURL); err == nil {
+			q := u.Query()
+			if strings.TrimSpace(q.Get("latency")) == "" {
+				q.Set("latency", fmt.Sprintf("%d", s.cfg.PGMDefaultLatencyMs))
+				u.RawQuery = q.Encode()
+				out.PlaybackSRTURL = u.String()
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if s.cfg.RouteControlBaseURL == "" {
+		http.Error(w, `{"error":"VBS_ROUTE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
+	if err != nil {
+		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
+		return
+	}
+	if len(strings.TrimSpace(string(body))) == 0 {
+		http.Error(w, `{"error":"body required"}`, http.StatusBadRequest)
+		return
+	}
+	respBody, status, err := s.routeControlPOST("/api/v1/route/buffer", body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"route buffer proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if status > 0 {
+		w.WriteHeader(status)
+	}
+	_, _ = w.Write(respBody)
+}
+
+func (s *Server) routeControlPOST(path string, body []byte) ([]byte, int, error) {
+	base := strings.TrimRight(s.cfg.RouteControlBaseURL, "/")
+	target := base + path
+	req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token := strings.TrimSpace(s.cfg.RouteControlToken); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return raw, resp.StatusCode, nil
 }

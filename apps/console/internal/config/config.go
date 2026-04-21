@@ -25,6 +25,9 @@ type Config struct {
 	CFAccessTeamDomain string
 	CFAccessAUD        string
 	CFAccessClientsRaw string
+	RouteControlBaseURL string
+	RouteControlToken   string
+	PGMDefaultLatencyMs int
 }
 
 // Load reads configuration from environment variables.
@@ -69,12 +72,24 @@ func Load() (*Config, error) {
 		CFAccessTeamDomain: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_TEAM_DOMAIN")),
 		CFAccessAUD:        strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_AUD")),
 		CFAccessClientsRaw: accessClientsRaw,
+		RouteControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_BASE_URL")),
+		RouteControlToken:   strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_TOKEN")),
+		PGMDefaultLatencyMs: getenvIntDefault("VBS_PGM_DEFAULT_LATENCY_MS", 200),
 	}, nil
 }
 
 func getenvDefault(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
+	}
+	return def
+}
+
+func getenvIntDefault(key string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return def
 }
