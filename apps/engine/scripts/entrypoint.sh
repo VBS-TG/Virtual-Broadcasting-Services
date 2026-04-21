@@ -8,13 +8,51 @@ if [[ "${VBS_ENGINE_USE_TEST_SOURCES:-0}" != "1" ]]; then
   fi
 fi
 
-if [[ -z "${VBS_ENGINE_PGM_SRT_URI:-}" ]]; then
-  echo "錯誤: 請設定 VBS_ENGINE_PGM_SRT_URI" >&2
-  exit 1
-fi
+build_relay_uri_if_needed() {
+  if [[ -n "${VBS_ENGINE_PGM_SRT_URI:-}" ]]; then
+    return 0
+  fi
+
+  local relay_host="${VBS_ROUTE_PGM_RELAY_HOST:-}"
+  local relay_port="${VBS_ROUTE_PGM_RELAY_PORT:-}"
+  local stream_uuid="${VBS_PGM_STREAM_UUID:-}"
+  local passphrase="${VBS_SRT_PASSPHRASE:-}"
+  local latency="${VBS_ENGINE_PGM_SRT_LATENCY_MS:-200}"
+
+  if [[ -z "${relay_host}" || -z "${relay_port}" ]]; then
+    echo "錯誤: 未設定 VBS_ENGINE_PGM_SRT_URI，且缺少 VBS_ROUTE_PGM_RELAY_HOST / VBS_ROUTE_PGM_RELAY_PORT" >&2
+    exit 1
+  fi
+  if [[ -z "${passphrase}" ]]; then
+    echo "錯誤: Relay 模式需要 VBS_SRT_PASSPHRASE（未提供 VBS_ENGINE_PGM_SRT_URI 時）" >&2
+    exit 1
+  fi
+  if [[ -z "${stream_uuid}" ]]; then
+    if command -v uuidgen >/dev/null 2>&1; then
+      stream_uuid="$(uuidgen | tr 'A-Z' 'a-z')"
+    elif [[ -r /proc/sys/kernel/random/uuid ]]; then
+      stream_uuid="$(cat /proc/sys/kernel/random/uuid)"
+    else
+      stream_uuid="$(date +%s)"
+    fi
+  fi
+
+  export VBS_PGM_STREAM_UUID="${stream_uuid}"
+  export VBS_ENGINE_PGM_STREAMID_PUBLISH="${VBS_ENGINE_PGM_STREAMID_PUBLISH:-publish/${stream_uuid}}"
+  export VBS_ENGINE_PGM_STREAMID_READ="${VBS_ENGINE_PGM_STREAMID_READ:-read/${stream_uuid}}"
+
+  export VBS_ENGINE_PGM_SRT_URI="srt://${relay_host}:${relay_port}?mode=caller&transtype=live&streamid=${VBS_ENGINE_PGM_STREAMID_PUBLISH}&passphrase=${passphrase}&pbkeylen=32&latency=${latency}"
+
+  local public_host="${VBS_ROUTE_PGM_PUBLIC_HOST:-${relay_host}}"
+  local read_url="srt://${public_host}:${relay_port}?streamid=${VBS_ENGINE_PGM_STREAMID_READ}&passphrase=${passphrase}&latency=${latency}"
+  echo "[vbs-engine] Relay 模式：自動生成 publish streamid=${VBS_ENGINE_PGM_STREAMID_PUBLISH}"
+  echo "[vbs-engine] 播放方 read URL: ${read_url}"
+}
 
 export PORT="${PORT:-${VBS_ENGINE_API_PORT:-5000}}"
 TCP_PORT="${VBS_ENGINE_PGM_TCP_PORT:-30090}"
+
+build_relay_uri_if_needed
 
 # GStreamer：確保 Brave 使用的 Gst 登錄檔掃到 plugins-bad（intervideosink）；映像為 amd64。
 for _gstplug in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 /usr/lib/aarch64-linux-gnu/gstreamer-1.0; do
