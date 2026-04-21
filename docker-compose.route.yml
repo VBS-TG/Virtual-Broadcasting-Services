@@ -15,6 +15,13 @@ services:
       - VBS_ROUTE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
       - VBS_ROUTE_SRTLA_INGEST_PORT=20020
       - VBS_ROUTE_SRT_OUTPUT_PORT=20030
+      # PGM Relay StreamID 路由（預設 publish/read）
+      - VBS_ROUTE_PGM_STREAMID_PUBLISH_PREFIX=publish
+      - VBS_ROUTE_PGM_STREAMID_READ_PREFIX=read
+      # Console 產生播放 URL 用（若未設定，將 fallback request host）
+      # - VBS_ROUTE_PGM_PUBLIC_HOST=live.example.com
+      # - VBS_ROUTE_PGM_PUBLIC_PORT=20030
+      # - VBS_ROUTE_PGM_READ_LATENCY_MS=200
       - VBS_ROUTE_INTERNAL_SRT_PORT=20021
       - VBS_ROUTE_LOSS_MAX_TTL=40
       - VBS_ROUTE_SRT_LATENCY_MS=2000

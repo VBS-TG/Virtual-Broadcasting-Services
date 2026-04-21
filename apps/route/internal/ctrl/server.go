@@ -2,8 +2,11 @@ package ctrl
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -82,6 +85,42 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 		_, _ = w.Write([]byte(`{"applied":true}`))
 	})
 
+	mux.HandleFunc("/api/v1/route/pgm/session", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizedControlPlane(r, cfg, auth) {
+			logger.Printf("[route][ctrl] 未授權的 API 請求 remote=%s path=%s", r.RemoteAddr, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		uuid := randomHex(16)
+		publish := fmt.Sprintf("%s/%s", cfg.PGMRelayPublishPrefix, uuid)
+		read := fmt.Sprintf("%s/%s", cfg.PGMRelayReadPrefix, uuid)
+		host := cfg.PGMRelayPublicHost
+		if host == "" {
+			host = r.Host
+			if i := strings.Index(host, ":"); i > 0 {
+				host = host[:i]
+			}
+			if host == "" {
+				host = "route.example.com"
+			}
+		}
+		readURL := fmt.Sprintf("srt://%s:%d?streamid=%s&passphrase=%s&latency=%d",
+			host, cfg.PGMRelayPublicPort, read, cfg.SRTPassphrase, cfg.PGMRelayLatencyMs)
+		resp := map[string]string{
+			"stream_uuid":       uuid,
+			"publish_streamid":  publish,
+			"read_streamid":     read,
+			"playback_srt_url":  readURL,
+			"relay_host":        host,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	srv := &http.Server{
 		Addr:              bind,
 		Handler:           mux,
@@ -122,4 +161,12 @@ func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleaut
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "00000000000000000000000000000000"
+	}
+	return hex.EncodeToString(b)
 }

@@ -46,6 +46,13 @@ type Config struct {
 
 	// ControlBind：HTTP 控制面監聽位址，例如「:20080」；空字串表示不啟用。
 	ControlBind string
+
+	// PGM Relay（SRT StreamID 路由）
+	PGMRelayPublishPrefix string
+	PGMRelayReadPrefix    string
+	PGMRelayPublicHost    string
+	PGMRelayPublicPort    int
+	PGMRelayLatencyMs     int
 }
 
 const (
@@ -72,6 +79,12 @@ const (
 	envStallTraffic = "VBS_ROUTE_STALL_TRAFFIC_MBPS"
 
 	envControlBind = "VBS_ROUTE_CONTROL_BIND"
+
+	envPGMRelayPublishPrefix = "VBS_ROUTE_PGM_STREAMID_PUBLISH_PREFIX"
+	envPGMRelayReadPrefix    = "VBS_ROUTE_PGM_STREAMID_READ_PREFIX"
+	envPGMRelayPublicHost    = "VBS_ROUTE_PGM_PUBLIC_HOST"
+	envPGMRelayPublicPort    = "VBS_ROUTE_PGM_PUBLIC_PORT"
+	envPGMRelayLatencyMs     = "VBS_ROUTE_PGM_READ_LATENCY_MS"
 )
 
 // Load 讀取環境變數。
@@ -115,6 +128,12 @@ func Load() Config {
 	} else {
 		cfg.ControlBind = ":20080"
 	}
+
+	cfg.PGMRelayPublishPrefix = strings.Trim(strings.TrimSpace(getenvOrDefault(envPGMRelayPublishPrefix, "publish")), "/")
+	cfg.PGMRelayReadPrefix = strings.Trim(strings.TrimSpace(getenvOrDefault(envPGMRelayReadPrefix, "read")), "/")
+	cfg.PGMRelayPublicHost = strings.TrimSpace(os.Getenv(envPGMRelayPublicHost))
+	cfg.PGMRelayPublicPort = getenvIntOrDefault(envPGMRelayPublicPort, cfg.SRTOutputPort)
+	cfg.PGMRelayLatencyMs = getenvIntOrDefault(envPGMRelayLatencyMs, 200)
 
 	return cfg
 }
@@ -178,6 +197,18 @@ func (c Config) Validate() error {
 	}
 	if c.StallTrafficMbps < 0 {
 		return fmt.Errorf("VBS_ROUTE_STALL_TRAFFIC_MBPS 不可為負數")
+	}
+	if c.PGMRelayPublishPrefix == "" || strings.Contains(c.PGMRelayPublishPrefix, " ") {
+		return fmt.Errorf("VBS_ROUTE_PGM_STREAMID_PUBLISH_PREFIX 格式不合法")
+	}
+	if c.PGMRelayReadPrefix == "" || strings.Contains(c.PGMRelayReadPrefix, " ") {
+		return fmt.Errorf("VBS_ROUTE_PGM_STREAMID_READ_PREFIX 格式不合法")
+	}
+	if c.PGMRelayPublicPort <= 0 {
+		return fmt.Errorf("VBS_ROUTE_PGM_PUBLIC_PORT 必須為正整數")
+	}
+	if c.PGMRelayLatencyMs <= 0 {
+		return fmt.Errorf("VBS_ROUTE_PGM_READ_LATENCY_MS 必須為正整數")
 	}
 	return nil
 }
