@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vbs/schemas/node-status.v1.schema.json",
+  "title": "VBS Node Status Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["node_id", "node_type", "updated_at_ms"],
+  "properties": {
+    "node_id": { "type": "string", "minLength": 1 },
+    "node_type": { "type": "string", "enum": ["capture", "route", "engine", "console"] },
+    "updated_at_ms": { "type": "integer", "minimum": 0 },
+    "online": { "type": "boolean" },
+    "metrics": { "type": "object" }
+  }
+}

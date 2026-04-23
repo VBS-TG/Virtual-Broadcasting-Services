@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vbs/schemas/control.route-buffer.v1.schema.json",
+  "title": "VBS Route Buffer Control v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "latency_ms": { "type": "integer", "minimum": 1 },
+    "loss_max_ttl": { "type": "integer", "minimum": 1 }
+  },
+  "minProperties": 1
+}

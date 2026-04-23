@@ -39,7 +39,7 @@ func Run(ctx context.Context, cfg config.Config) {
 	auth := consoleauth.NewProvider(cfg)
 	go telemetry.StartReporter(ctx, cfg, logger, pipeline, collector, restartCh, auth)
 
-	ctrl.Start(ctx, cfg, buf, restartCh, logger, auth)
+	ctrl.Start(ctx, cfg, buf, restartCh, logger, auth, pipeline, collector)
 
 	<-ctx.Done()
 }

@@ -80,7 +80,7 @@
 
 ## VBS-Engine（`apps/engine`）
 
-基於 [BBC Brave](https://github.com/bbc/brave)（GStreamer）：**2 路 SRT（`uri` 入）**、左右分割 **mixer**、**WebRTC** 監看（Brave 內建網頁/API，**非**標準 WHEP；標準 WHEP 可後續再換）、**TCP MPEG** 接 **ffmpeg** 再以 **SRT Caller** 輸出 **PGM**。  
+基於 **Eyevinn 風格 TypeScript/Node 媒體核心**：**2 路 SRT（`uri` 入）**、切換盤 API（Program/Preview/AUX）、**PGM + 4 路 AUX** 以 SRT Caller 輸出至 Route。  
 **WSS 遙測**：已實作（1Hz，Bearer JWT，單筆 ≤255 bytes），以 Cloudflare Access 向 Console 註冊後自動換發/續約 JWT。
 
 ### 環境變數（Engine 容器）
@@ -90,11 +90,11 @@
 | `VBS_ENGINE_SRT_INPUT_1_URI` | 是 | 第一路 SRT Caller URI（例 `srt://route.example.com:20030?mode=caller&latency=2000&passphrase=...&pbkeylen=32`） |
 | `VBS_ENGINE_SRT_INPUT_2_URI` | 是 | 第二路（測試可與第一路相同 URI 複製畫面） |
 | `VBS_ENGINE_PGM_SRT_URI` | 是 | PGM 輸出之 SRT Caller 完整 URI（ffmpeg 以 mpegts 送出） |
+| `VBS_ENGINE_AUX1_SRT_URI` ~ `VBS_ENGINE_AUX4_SRT_URI` | 否 | AUX 輸出之 SRT Caller URI；未填可由 Relay host/port + streamid 自動組合。 |
 | `VBS_ENGINE_MIXER_WIDTH` | 否 | 預設 `854`（約 480p 16:9 寬） |
 | `VBS_ENGINE_MIXER_HEIGHT` | 否 | 預設 `480` |
-| `VBS_ENGINE_PGM_TCP_PORT` | 否 | Brave 內部 TCP 伺服器埠，預設 `30090`（僅本機環，`ffmpeg` 連線用） |
-| `PORT` / `VBS_ENGINE_API_PORT` | 否 | Brave REST/Web 預設 `5000` |
-| `VBS_ENGINE_STUN_SERVER` | 否 | WebRTC 用，預設 `stun.l.google.com:19302` |
+| `VBS_ENGINE_CONTROL_BIND_HOST` / `VBS_ENGINE_CONTROL_BIND_PORT` | 否 | Engine 切換盤 API 監聽位址，預設 `0.0.0.0:5010`。 |
+| `VBS_ENGINE_CONTROL_TOKEN` | 否 | Engine 切換盤 API Bearer Token；建議於 Console proxy 層啟用。 |
 | `VBS_CONSOLE_BASE_URL` | 否 | 設定後啟用 Engine telemetry，以上報至 Console `wss://.../vbs/telemetry/ws`。 |
 | `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET` | 是（啟用 telemetry 時） | Engine 以 Cloudflare Access service token 呼叫 `POST /api/v1/auth/register` 自動換發/續約 JWT。 |
 | `VBS_ENGINE_TELEMETRY_ENABLED` | 否 | 預設 `1`；設 `0` 關閉 telemetry。 |
@@ -106,13 +106,20 @@
 
 | 用途 | 預設 |
 | :--- | :--- |
-| Brave HTTP / WebRTC 信令與內建 UI | `5000` TCP（`network_mode: host` 時為主機 `5000`） |
-| 內部 PGM 橋接（ffmpeg→Brave TCP） | `30090` TCP（僅容器內，可不對外） |
+| Engine 控制 API（switch/program/preview/aux） | `5010` TCP（`network_mode: host` 時為主機 `5010`） |
+| Engine 輸入輸出資料平面 | 依 SRT URI 與 Relay 設定決定 |
 
 ### CI/CD
 
 - Workflow：`.github/workflows/vbs-engine-publish.yml`
 - 映像：`ghcr.io/<owner小寫>/<repo小寫>/vbs-engine`
+
+### 控制 API（Engine）
+
+- `POST /api/v1/switch/program`：切 Program 來源（body：`{"source":"input1|input2|srt://..."}`）。
+- `POST /api/v1/switch/preview`：切 Preview 來源（body：同上）。
+- `POST /api/v1/switch/aux`：切 AUX 路由（body：`{"channel":"1..4","source":"input1|input2|srt://..."}`）。
+- `GET /api/v1/switch/state`：查目前 Program/Preview/AUX 狀態。
 
 ### 部署
 
@@ -171,6 +178,7 @@ Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 *
 - `packages/shared/schemas/control.route-buffer.v1.schema.json`
 - `packages/shared/schemas/node-status.v1.schema.json`
 - `packages/shared/schemas/console-telemetry-latest.v1.schema.json`（Console `GET /api/v1/telemetry/latest` 回應快照，MVP-A）
+- `packages/shared/schemas/control.engine-switch.v1.schema.json`
 
 新增或修改跨節點封包時，必須先更新上述 schema，再更新各節點實作。
 

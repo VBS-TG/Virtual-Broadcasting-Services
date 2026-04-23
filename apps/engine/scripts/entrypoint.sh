@@ -1,135 +1,16 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${VBS_ENGINE_USE_TEST_SOURCES:-0}" != "1" ]]; then
-  if [[ -z "${VBS_ENGINE_SRT_INPUT_1_URI:-}" || -z "${VBS_ENGINE_SRT_INPUT_2_URI:-}" ]]; then
-    echo "錯誤: 請設定 VBS_ENGINE_SRT_INPUT_1_URI 與 VBS_ENGINE_SRT_INPUT_2_URI（或使用 VBS_ENGINE_USE_TEST_SOURCES=1）" >&2
-    exit 1
-  fi
-fi
-
-build_relay_uri_if_needed() {
-  if [[ -n "${VBS_ENGINE_PGM_SRT_URI:-}" ]]; then
-    return 0
-  fi
-
-  local relay_host="${VBS_ROUTE_PGM_RELAY_HOST:-}"
-  local relay_port="${VBS_ROUTE_PGM_RELAY_PORT:-}"
-  local stream_uuid="${VBS_PGM_STREAM_UUID:-}"
-  local passphrase="${VBS_SRT_PASSPHRASE:-}"
-  local latency="${VBS_ENGINE_PGM_SRT_LATENCY_MS:-200}"
-
-  if [[ -z "${relay_host}" || -z "${relay_port}" ]]; then
-    echo "錯誤: 未設定 VBS_ENGINE_PGM_SRT_URI，且缺少 VBS_ROUTE_PGM_RELAY_HOST / VBS_ROUTE_PGM_RELAY_PORT" >&2
-    exit 1
-  fi
-  if [[ -z "${passphrase}" ]]; then
-    echo "錯誤: Relay 模式需要 VBS_SRT_PASSPHRASE（未提供 VBS_ENGINE_PGM_SRT_URI 時）" >&2
-    exit 1
-  fi
-  if [[ -z "${stream_uuid}" ]]; then
-    if command -v uuidgen >/dev/null 2>&1; then
-      stream_uuid="$(uuidgen | tr 'A-Z' 'a-z')"
-    elif [[ -r /proc/sys/kernel/random/uuid ]]; then
-      stream_uuid="$(cat /proc/sys/kernel/random/uuid)"
-    else
-      stream_uuid="$(date +%s)"
-    fi
-  fi
-
-  export VBS_PGM_STREAM_UUID="${stream_uuid}"
-  export VBS_ENGINE_PGM_STREAMID_PUBLISH="${VBS_ENGINE_PGM_STREAMID_PUBLISH:-publish/${stream_uuid}}"
-  export VBS_ENGINE_PGM_STREAMID_READ="${VBS_ENGINE_PGM_STREAMID_READ:-read/${stream_uuid}}"
-
-  export VBS_ENGINE_PGM_SRT_URI="srt://${relay_host}:${relay_port}?mode=caller&transtype=live&streamid=${VBS_ENGINE_PGM_STREAMID_PUBLISH}&passphrase=${passphrase}&pbkeylen=32&latency=${latency}"
-
-  local public_host="${VBS_ROUTE_PGM_PUBLIC_HOST:-${relay_host}}"
-  local read_url="srt://${public_host}:${relay_port}?streamid=${VBS_ENGINE_PGM_STREAMID_READ}&passphrase=${passphrase}&latency=${latency}"
-  echo "[vbs-engine] Relay 模式：自動生成 publish streamid=${VBS_ENGINE_PGM_STREAMID_PUBLISH}"
-  echo "[vbs-engine] 播放方 read URL: ${read_url}"
-}
-
-export PORT="${PORT:-${VBS_ENGINE_API_PORT:-5000}}"
-TCP_PORT="${VBS_ENGINE_PGM_TCP_PORT:-30090}"
-
-build_relay_uri_if_needed
-
-# GStreamer：確保 Brave 使用的 Gst 登錄檔掃到 plugins-bad（intervideosink）；映像為 amd64。
-for _gstplug in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 /usr/lib/aarch64-linux-gnu/gstreamer-1.0; do
-  if [[ -d "${_gstplug}" ]]; then
-    export GST_PLUGIN_PATH="${_gstplug}${GST_PLUGIN_PATH:+:${GST_PLUGIN_PATH}}"
-    break
-  fi
-done
-
-python3 /opt/vbs-engine/scripts/generate_brave_config.py
-
-cd /opt/brave
-
-if ! gst-inspect-1.0 intervideosink >/dev/null 2>&1; then
-  echo "[vbs-engine] 錯誤: gst-inspect 找不到 intervideosink（缺 gstreamer1.0-plugins-bad 或 GST_PLUGIN_PATH）。GST_PLUGIN_PATH=${GST_PLUGIN_PATH:-}" >&2
-  exit 1
-fi
-if ! GST_PLUGIN_PATH="${GST_PLUGIN_PATH:-}" .venv/bin/python -c "
-import gi
-gi.require_version('Gst','1.0')
-from gi.repository import Gst
-Gst.init(None)
-assert Gst.ElementFactory.make('intervideosink','probe') is not None
-"; then
-  echo "[vbs-engine] 錯誤: Python/GI 無法建立 intervideosink（請確認映像已 docker build --no-cache）。" >&2
+if [[ -z "${VBS_ENGINE_SRT_INPUT_1_URI:-}" || -z "${VBS_ENGINE_SRT_INPUT_2_URI:-}" ]]; then
+  echo "錯誤: 需設定 VBS_ENGINE_SRT_INPUT_1_URI 與 VBS_ENGINE_SRT_INPUT_2_URI" >&2
   exit 1
 fi
 
-cleanup() {
-  [[ -n "${BRAVE_PID:-}" ]] && kill "$BRAVE_PID" 2>/dev/null || true
-  [[ -n "${FF_PID:-}" ]] && kill "$FF_PID" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
-
-echo "[vbs-engine] 啟動 Brave…"
-/opt/brave/.venv/bin/python brave.py -c "${VBS_ENGINE_BRAVE_CONFIG_PATH:-/tmp/brave.yaml}" &
-BRAVE_PID=$!
-
-WAIT_SEC="${VBS_ENGINE_PGM_TCP_WAIT_SEC:-240}"
-echo "[vbs-engine] 等待 Brave TCP PGM (${TCP_PORT})，最多 ${WAIT_SEC}s…"
-for _ in $(seq 1 "${WAIT_SEC}"); do
-  if ss -tln 2>/dev/null | grep -q ":${TCP_PORT}"; then
-    echo "[vbs-engine] Brave TCP PGM 已就緒 (${TCP_PORT})"
-    break
-  fi
-  sleep 1
-done
-
-if ! ss -tln 2>/dev/null | grep -q ":${TCP_PORT}"; then
-  echo "[vbs-engine] 警告: 等待 TCP ${TCP_PORT} 逾時（${WAIT_SEC}s），略過 ffmpeg PGM（僅啟動 telemetry，如有設定）。可調高 VBS_ENGINE_PGM_TCP_WAIT_SEC 或檢查 Brave 日誌／輸入源是否就緒。" >&2
-else
-  if ffmpeg -hide_banner -protocols 2>/dev/null | grep -qE '(^|[[:space:]])srt($|[[:space:]])'; then
-    echo "[vbs-engine] 啟動 ffmpeg → SRT PGM…"
-    ffmpeg -hide_banner -loglevel info \
-      -fflags +genpts \
-      -i "tcp://127.0.0.1:${TCP_PORT}?timeout=0" \
-      -c copy \
-      -f mpegts \
-      "${VBS_ENGINE_PGM_SRT_URI}" &
-    FF_PID=$!
-  elif command -v gst-launch-1.0 >/dev/null 2>&1; then
-    echo "[vbs-engine] ffmpeg 不支援 SRT，改用 GStreamer srtsink 轉送 PGM…"
-    gst-launch-1.0 -q \
-      tcpclientsrc host=127.0.0.1 port="${TCP_PORT}" \
-      ! queue \
-      ! srtsink uri="${VBS_ENGINE_PGM_SRT_URI}" &
-    FF_PID=$!
-  else
-    echo "[vbs-engine] 錯誤: ffmpeg 無 SRT 協定且系統無 gst-launch-1.0，無法推送 VBS_ENGINE_PGM_SRT_URI" >&2
-  fi
+if [[ -z "${VBS_SRT_PASSPHRASE:-}" ]]; then
+  echo "錯誤: 需設定 VBS_SRT_PASSPHRASE（AES-256）" >&2
+  exit 1
 fi
 
-if [[ -n "${VBS_CONSOLE_BASE_URL:-}" && "${VBS_ENGINE_TELEMETRY_ENABLED:-1}" != "0" ]]; then
-  echo "[vbs-engine] 啟動 telemetry → Console…"
-  /opt/brave/.venv/bin/python /opt/vbs-engine/scripts/engine_telemetry.py &
-  TELEMETRY_PID=$!
-fi
-
-wait "$BRAVE_PID" ${FF_PID:+$FF_PID} "${TELEMETRY_PID:-}"
+echo "[vbs-engine] 啟動 Eyevinn TypeScript engine core..."
+exec node /opt/vbs-engine/dist/index.js
 
