@@ -9,7 +9,7 @@ services:
       - path: .env.route
         required: false
     environment:
-      - VBS_NODE_ID=vbs-route-01
+      - VBS_NODE_ID=${VBS_NODE_ID}
       - VBS_LOG_LEVEL=info
       - VBS_METRICS_INTERVAL=1000ms
       - VBS_ROUTE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
