@@ -1,0 +1,53 @@
+name: Protocol Governance
+
+on:
+  pull_request:
+    paths:
+      - "protocol.md"
+      - "packages/shared/schemas/**"
+      - ".github/workflows/protocol-governance.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-schema-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate protocol/schema synchronization
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+
+          PROTOCOL_CHANGED=0
+          SCHEMA_CHANGED=0
+
+          if echo "$CHANGED_FILES" | grep -q '^protocol\.md$'; then
+            PROTOCOL_CHANGED=1
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q '^packages/shared/schemas/'; then
+            SCHEMA_CHANGED=1
+          fi
+
+          if [ "$PROTOCOL_CHANGED" -eq 1 ] && [ "$SCHEMA_CHANGED" -eq 0 ]; then
+            echo "::error::偵測到 protocol.md 變更，但未同步更新 packages/shared/schemas/**。"
+            exit 1
+          fi
+
+          if [ "$PROTOCOL_CHANGED" -eq 0 ] && [ "$SCHEMA_CHANGED" -eq 1 ]; then
+            echo "::error::偵測到 packages/shared/schemas/** 變更，但未同步更新 protocol.md。"
+            exit 1
+          fi
+
+          echo "protocol.md 與 shared schema 變更已對齊。"
