@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vbs/schemas/control.engine-switch.v1.schema.json",
+  "title": "VBS Engine Switch Control v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action", "source"],
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["program", "preview", "aux"]
+    },
+    "channel": {
+      "type": "string",
+      "enum": ["1", "2", "3", "4"]
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "action": { "const": "aux" } } },
+      "then": { "required": ["channel"] }
+    }
+  ]
+}

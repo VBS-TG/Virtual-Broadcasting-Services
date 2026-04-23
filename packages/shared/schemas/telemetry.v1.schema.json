@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vbs/schemas/telemetry.v1.schema.json",
+  "title": "VBS Telemetry Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["node_id", "node_type", "ts_ms", "metrics"],
+  "properties": {
+    "node_id": { "type": "string", "minLength": 1 },
+    "node_type": { "type": "string", "enum": ["capture", "route", "engine", "console"] },
+    "ts_ms": { "type": "integer", "minimum": 0 },
+    "metrics": { "type": "object" },
+    "auth_mode": { "type": "string", "enum": ["bearer"] }
+  }
+}
