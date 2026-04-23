@@ -1,4 +1,4 @@
-﻿## VBS-Route 服務清單與通訊規範（正式執行）
+## VBS-Route 服務清單與通訊規範（正式執行）
 
 **節點埠區（規劃）**：Capture `10010…`、Route `20010…`、Engine `30010…`、Console `40010…`。Route 資料平面預設使用 `20020`（SRTLA 入）、`20021`（內部 SRT）、`20030`（對 Engine SRT 出）；可經環境變數覆寫。
 
@@ -181,5 +181,6 @@ Console 為 **JWT 簽發（測試／節點用）**、**遙測 WSS ingest** 與 *
 - 發布 workflow：
   - `.github/workflows/vbs-route-publish.yml`
   - `.github/workflows/vbs-engine-publish.yml`
+  - `.github/workflows/vbs-console-publish.yml`
 - 協定治理 workflow：`.github/workflows/protocol-governance.yml`
   - 若 PR 變更 `protocol.md`，必須同步調整 `packages/shared/schemas/**`；反向亦同。
