@@ -10,23 +10,24 @@ import (
 )
 
 const (
-	defaultListen = ":4000"
-	defaultJWTTTL = 3600 // seconds
+	defaultListen            = ":4000"
+	defaultJWKSCacheTTLInSec = 3600
 )
 
 // Config holds runtime settings for the console server.
 type Config struct {
 	ListenAddr   string
-	JWTSecret    string
-	JWTTTL       time.Duration
 	TelemetryMax int // max raw WS message size (bytes), default 255
+
 	CFAccessMode       string
 	CFAccessTeamDomain string
 	CFAccessAUD        string
-	CFAccessClientsRaw string
-	RouteControlBaseURL string
-	RouteControlToken   string
-	PGMDefaultLatencyMs int
+	CFAccessJWKSURL    string
+	CFAccessJWKSCacheTTL time.Duration
+
+	RouteControlBaseURL  string
+	RouteControlToken    string
+	PGMDefaultLatencyMs  int
 	EngineControlBaseURL string
 	EngineControlToken   string
 }
@@ -37,22 +38,29 @@ func Load() (*Config, error) {
 	if listen == "" {
 		listen = defaultListen
 	}
-	secret := strings.TrimSpace(os.Getenv("VBS_CONSOLE_JWT_SECRET"))
-	if secret == "" {
-		return nil, fmt.Errorf("VBS_CONSOLE_JWT_SECRET is required")
+	accessMode := strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "jwt")))
+	if accessMode == "disabled" {
+		return nil, fmt.Errorf("VBS_CF_ACCESS_MODE=disabled is not allowed in ZTA mode")
 	}
-	ttlSec := defaultJWTTTL
-	if v := strings.TrimSpace(os.Getenv("VBS_CONSOLE_JWT_TTL_SEC")); v != "" {
+	if accessMode != "jwt" && accessMode != "" {
+		return nil, fmt.Errorf("unsupported VBS_CF_ACCESS_MODE=%q (expected jwt)", accessMode)
+	}
+	aud := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_AUD"))
+	if aud == "" {
+		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD is required")
+	}
+	teamDomain := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_TEAM_DOMAIN"))
+	jwksURL := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_JWKS_URL"))
+	if teamDomain == "" && jwksURL == "" {
+		return nil, fmt.Errorf("either VBS_CF_ACCESS_TEAM_DOMAIN or VBS_CF_ACCESS_JWKS_URL is required")
+	}
+	jwksTTL := defaultJWKSCacheTTLInSec
+	if v := strings.TrimSpace(os.Getenv("VBS_CF_JWKS_CACHE_TTL_SEC")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 60 {
-			return nil, fmt.Errorf("VBS_CONSOLE_JWT_TTL_SEC must be an integer >= 60")
+			return nil, fmt.Errorf("VBS_CF_JWKS_CACHE_TTL_SEC must be an integer >= 60")
 		}
-		ttlSec = n
-	}
-	accessMode := strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "service_token")))
-	accessClientsRaw := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_CLIENTS"))
-	if accessMode == "service_token" && accessClientsRaw == "" {
-		return nil, fmt.Errorf("VBS_CF_ACCESS_CLIENTS is required when VBS_CF_ACCESS_MODE=service_token")
+		jwksTTL = n
 	}
 	maxPayload := 255
 	if v := strings.TrimSpace(os.Getenv("VBS_CONSOLE_TELEMETRY_MAX_BYTES")); v != "" {
@@ -63,14 +71,13 @@ func Load() (*Config, error) {
 		maxPayload = n
 	}
 	return &Config{
-		ListenAddr:   listen,
-		JWTSecret:    secret,
-		JWTTTL:       time.Duration(ttlSec) * time.Second,
-		TelemetryMax: maxPayload,
+		ListenAddr:         listen,
+		TelemetryMax:       maxPayload,
 		CFAccessMode:       accessMode,
-		CFAccessTeamDomain: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_TEAM_DOMAIN")),
-		CFAccessAUD:        strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_AUD")),
-		CFAccessClientsRaw: accessClientsRaw,
+		CFAccessTeamDomain: teamDomain,
+		CFAccessAUD:        aud,
+		CFAccessJWKSURL:    jwksURL,
+		CFAccessJWKSCacheTTL: time.Duration(jwksTTL) * time.Second,
 		RouteControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_BASE_URL")),
 		RouteControlToken:   strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_TOKEN")),
 		PGMDefaultLatencyMs: getenvIntDefault("VBS_PGM_DEFAULT_LATENCY_MS", 200),
