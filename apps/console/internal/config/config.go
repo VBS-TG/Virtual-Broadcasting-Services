@@ -19,7 +19,6 @@ type Config struct {
 	ListenAddr   string
 	JWTSecret    string
 	JWTTTL       time.Duration
-	AdminToken   string
 	TelemetryMax int // max raw WS message size (bytes), default 255
 	CFAccessMode       string
 	CFAccessTeamDomain string
@@ -50,7 +49,6 @@ func Load() (*Config, error) {
 		}
 		ttlSec = n
 	}
-	admin := strings.TrimSpace(os.Getenv("VBS_CONSOLE_ADMIN_TOKEN"))
 	accessMode := strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "service_token")))
 	accessClientsRaw := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_CLIENTS"))
 	if accessMode == "service_token" && accessClientsRaw == "" {
@@ -68,7 +66,6 @@ func Load() (*Config, error) {
 		ListenAddr:   listen,
 		JWTSecret:    secret,
 		JWTTTL:       time.Duration(ttlSec) * time.Second,
-		AdminToken:   admin,
 		TelemetryMax: maxPayload,
 		CFAccessMode:       accessMode,
 		CFAccessTeamDomain: strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_TEAM_DOMAIN")),
