@@ -11,6 +11,13 @@ if [[ -z "${VBS_SRT_PASSPHRASE:-}" ]]; then
   exit 1
 fi
 
+if [[ "${VBS_ENGINE_TELEMETRY_ENABLED:-1}" != "0" ]]; then
+  if [[ -z "${VBS_CF_ACCESS_JWT:-}" || -z "${VBS_CF_ACCESS_AUD:-}" ]]; then
+    echo "錯誤: 啟用 telemetry 時需設定 VBS_CF_ACCESS_JWT 與 VBS_CF_ACCESS_AUD" >&2
+    exit 1
+  fi
+fi
+
 echo "[vbs-engine] 啟動 Eyevinn TypeScript engine core..."
 exec node /opt/vbs-engine/dist/index.js
 

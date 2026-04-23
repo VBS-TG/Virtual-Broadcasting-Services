@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"vbs/apps/console/internal/auth"
@@ -26,21 +27,23 @@ const maxTokenBodyBytes = 4096
 // Server is the console HTTP server.
 type Server struct {
 	cfg    *config.Config
-	jwt    *auth.Manager
-	access *auth.CFAccessVerifier
+	access *auth.AccessJWTVerifier
 	hub    *telemetry.Hub
 	http   *http.Server
 	mux    *http.ServeMux
 	upgrader websocket.Upgrader
+
+	eventMu    sync.Mutex
+	eventConns map[*websocket.Conn]struct{}
 }
 
 // New constructs a Server from config.
 func New(cfg *config.Config) *Server {
 	s := &Server{
 		cfg: cfg,
-		jwt: auth.NewManager(cfg.JWTSecret, cfg.JWTTTL),
-		hub: telemetry.NewHub(),
+		hub: telemetry.NewHub(cfg.NodeOfflineTTL),
 		mux: http.NewServeMux(),
+		eventConns: make(map[*websocket.Conn]struct{}),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -49,12 +52,13 @@ func New(cfg *config.Config) *Server {
 			},
 		},
 	}
-	access, err := auth.NewCFAccessVerifier(cfg.CFAccessMode, cfg.CFAccessTeamDomain, cfg.CFAccessAUD, cfg.CFAccessClientsRaw)
+	access, err := auth.NewAccessJWTVerifier(cfg.CFAccessMode, cfg.CFAccessTeamDomain, cfg.CFAccessAUD, cfg.CFAccessJWKSURL, cfg.CFAccessJWKSCacheTTL)
 	if err != nil {
-		log.Printf("access verifier parse warning: %v", err)
+		log.Fatalf("access verifier init failed: %v", err)
 	}
 	s.access = access
 	s.routes()
+	go s.fanoutStatusEvents()
 	s.http = &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           s.mux,
@@ -65,10 +69,8 @@ func New(cfg *config.Config) *Server {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
-	s.mux.HandleFunc("POST /api/v1/auth/token", s.handleAuthToken)
-	s.mux.HandleFunc("POST /api/v1/auth/register", s.handleNodeRegister)
-	s.mux.HandleFunc("POST /api/v1/auth/refresh", s.handleAuthRefresh)
 	s.mux.HandleFunc("GET /vbs/telemetry/ws", s.handleTelemetryWS)
+	s.mux.HandleFunc("GET /vbs/telemetry/events/ws", s.handleTelemetryEventsWS)
 	s.mux.HandleFunc("GET /api/v1/telemetry/latest", s.handleTelemetryLatest)
 	s.mux.HandleFunc("POST /api/v1/stream/session-key", s.handleSessionKey)
 	s.mux.HandleFunc("POST /api/v1/pgm/session", s.handlePGMSession)
@@ -89,140 +91,14 @@ func (s *Server) ListenAndServe() error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.hub.Close()
+	s.closeEventConns()
 	return s.http.Shutdown(ctx)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
-}
-
-type tokenRequest struct {
-	NodeID string `json:"node_id"`
-	Role   string `json:"role"`
-}
-
-type tokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
-	ExpiresAt   int64  `json:"expires_at_unix"`
-}
-
-type registerRequest struct {
-	NodeID             string `json:"node_id"`
-	Role               string `json:"role"`
-	AccessClientID     string `json:"access_client_id"`
-	AccessClientSecret string `json:"access_client_secret"`
-}
-
-func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuthorized(r) {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
-	if err != nil {
-		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
-		return
-	}
-	var req tokenRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-	token, exp, err := s.jwt.Mint(req.NodeID, req.Role)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(tokenResponse{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(s.cfg.JWTTTL.Seconds()),
-		ExpiresAt:   exp.Unix(),
-	})
-}
-
-func (s *Server) handleNodeRegister(w http.ResponseWriter, r *http.Request) {
-	if s.access == nil || s.access.Mode() == "" || s.access.Mode() == "disabled" {
-		http.Error(w, `{"error":"node registration requires Cloudflare Access (VBS_CF_ACCESS_MODE=service_token)"}`, http.StatusServiceUnavailable)
-		return
-	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
-	if err != nil {
-		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
-		return
-	}
-	var req registerRequest
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-			return
-		}
-	}
-	// Fallback when edge/proxy strips auth headers: accept same credentials in JSON body.
-	if strings.TrimSpace(r.Header.Get("CF-Access-Client-Id")) == "" && strings.TrimSpace(req.AccessClientID) != "" {
-		r.Header.Set("CF-Access-Client-Id", strings.TrimSpace(req.AccessClientID))
-	}
-	if strings.TrimSpace(r.Header.Get("CF-Access-Client-Secret")) == "" && strings.TrimSpace(req.AccessClientSecret) != "" {
-		r.Header.Set("CF-Access-Client-Secret", strings.TrimSpace(req.AccessClientSecret))
-	}
-	if strings.TrimSpace(r.Header.Get("X-VBS-Node-ID")) == "" && strings.TrimSpace(req.NodeID) != "" {
-		r.Header.Set("X-VBS-Node-ID", strings.TrimSpace(req.NodeID))
-	}
-	identity, err := s.access.VerifyRequest(r)
-	if err != nil {
-		log.Printf(
-			"[console][auth/register] unauthorized access identity: %v remote=%s ua=%q has_cf_id=%t has_cf_secret=%t has_body_id=%t has_body_secret=%t node_id_hdr=%q node_id_body=%q",
-			err,
-			r.RemoteAddr,
-			r.UserAgent(),
-			strings.TrimSpace(r.Header.Get("CF-Access-Client-Id")) != "",
-			strings.TrimSpace(r.Header.Get("CF-Access-Client-Secret")) != "",
-			strings.TrimSpace(req.AccessClientID) != "",
-			strings.TrimSpace(req.AccessClientSecret) != "",
-			strings.TrimSpace(r.Header.Get("X-VBS-Node-ID")),
-			strings.TrimSpace(req.NodeID),
-		)
-		http.Error(w, `{"error":"unauthorized access identity"}`, http.StatusUnauthorized)
-		return
-	}
-	token, exp, err := s.jwt.Mint(identity.NodeID, identity.Role)
-	if err != nil {
-		http.Error(w, `{"error":"mint failed"}`, http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(tokenResponse{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(s.cfg.JWTTTL.Seconds()),
-		ExpiresAt:   exp.Unix(),
-	})
-}
-
-func (s *Server) handleAuthRefresh(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.jwt.ParseBearer(r.Header.Get("Authorization"))
-	if err != nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-	token, exp, err := s.jwt.Mint(claims.NodeID, claims.Role)
-	if err != nil {
-		http.Error(w, `{"error":"refresh failed"}`, http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(tokenResponse{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(s.cfg.JWTTTL.Seconds()),
-		ExpiresAt:   exp.Unix(),
-	})
 }
 
 func (s *Server) handleSessionKey(w http.ResponseWriter, r *http.Request) {
@@ -245,16 +121,11 @@ func (s *Server) handleSessionKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminAuthorized(r *http.Request) bool {
-	if s.access != nil && s.access.Mode() != "" && s.access.Mode() != "disabled" {
-		if identity, err := s.access.VerifyRequest(r); err == nil && strings.EqualFold(identity.Role, "admin") {
-			return true
-		}
-	}
-	claims, err := s.jwt.ParseBearer(r.Header.Get("Authorization"))
+	claims, err := s.access.VerifyRequest(r)
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(claims.Role), "admin")
+	return auth.IsAdminRole(claims.Role)
 }
 
 func (s *Server) handleTelemetryLatest(w http.ResponseWriter, r *http.Request) {
@@ -267,14 +138,17 @@ func (s *Server) handleTelemetryLatest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeLatest(w http.ResponseWriter) {
 	snap := s.hub.Snapshot()
+	presence := s.hub.PresenceSnapshot()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"latest": snap,
+		"latest":    snap,
+		"presence":  presence,
+		"ts_ms":     time.Now().UTC().UnixMilli(),
 	})
 }
 
 func (s *Server) handleTelemetryWS(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.jwt.ParseBearer(r.Header.Get("Authorization"))
+	claims, err := s.access.VerifyRequest(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -318,6 +192,67 @@ func (s *Server) handleTelemetryWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+	}
+}
+
+func (s *Server) handleTelemetryEventsWS(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("events websocket upgrade: %v", err)
+		return
+	}
+	s.eventMu.Lock()
+	s.eventConns[conn] = struct{}{}
+	s.eventMu.Unlock()
+
+	defer func() {
+		s.eventMu.Lock()
+		delete(s.eventConns, conn)
+		s.eventMu.Unlock()
+		_ = conn.Close()
+	}()
+
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		return nil
+	})
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
+func (s *Server) fanoutStatusEvents() {
+	events := s.hub.SubscribeStatusEvents()
+	for ev := range events {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			continue
+		}
+		s.eventMu.Lock()
+		for conn := range s.eventConns {
+			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {
+				_ = conn.Close()
+				delete(s.eventConns, conn)
+			}
+		}
+		s.eventMu.Unlock()
+	}
+}
+
+func (s *Server) closeEventConns() {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	for conn := range s.eventConns {
+		_ = conn.Close()
+		delete(s.eventConns, conn)
 	}
 }
 

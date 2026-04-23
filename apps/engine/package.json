@@ -8,11 +8,10 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "jsonwebtoken": "^9.0.2",
+    "jose": "^5.9.6",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.2",
     "@types/ws": "^8.5.13",
     "typescript": "^5.7.2"
