@@ -325,6 +325,17 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 }
 
 func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleauth.Provider) bool {
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
+	if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
+		return false
+	}
+	got := strings.TrimSpace(h[7:])
+	if got == "" {
+		return false
+	}
+	if want := strings.TrimSpace(cfg.ControlToken); want != "" {
+		return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	}
 	if auth == nil {
 		return false
 	}
@@ -332,14 +343,6 @@ func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleaut
 	defer cancel()
 	want, err := auth.BearerToken(ctx)
 	if err != nil || want == "" {
-		return false
-	}
-	h := strings.TrimSpace(r.Header.Get("Authorization"))
-	if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
-		return false
-	}
-	got := strings.TrimSpace(h[7:])
-	if got == "" {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
