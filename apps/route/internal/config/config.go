@@ -49,8 +49,6 @@ type Config struct {
 
 	// ControlBind：HTTP 控制面監聽位址，例如「:20080」；空字串表示不啟用。
 	ControlBind string
-	// ControlToken：Route 控制面固定 Bearer token；設定後優先以此驗證。
-	ControlToken string
 
 	// PGM Relay（SRT StreamID 路由）
 	PGMRelayPublishPrefix string
@@ -87,7 +85,6 @@ const (
 	envStallTraffic = "VBS_ROUTE_STALL_TRAFFIC_MBPS"
 
 	envControlBind = "VBS_ROUTE_CONTROL_BIND"
-	envControlToken = "VBS_ROUTE_CONTROL_TOKEN"
 
 	envPGMRelayPublishPrefix = "VBS_ROUTE_PGM_STREAMID_PUBLISH_PREFIX"
 	envPGMRelayReadPrefix    = "VBS_ROUTE_PGM_STREAMID_READ_PREFIX"
@@ -144,7 +141,6 @@ func Load() Config {
 	} else {
 		cfg.ControlBind = ":20080"
 	}
-	cfg.ControlToken = strings.TrimSpace(os.Getenv(envControlToken))
 
 	cfg.PGMRelayPublishPrefix = strings.Trim(strings.TrimSpace(getenvOrDefault(envPGMRelayPublishPrefix, "publish")), "/")
 	cfg.PGMRelayReadPrefix = strings.Trim(strings.TrimSpace(getenvOrDefault(envPGMRelayReadPrefix, "read")), "/")

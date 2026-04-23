@@ -1,5 +1,5 @@
-# Console — JWT、遙測 WSS、健康檢查。
-# 必填：同目錄建立 .env.console（VBS_CONSOLE_JWT_SECRET、VBS_CONSOLE_ADMIN_TOKEN、VBS_CF_ACCESS_CLIENTS 等，勿提交版本庫）。
+# Console — Cloudflare JWT 驗證、遙測 WSS、健康檢查。
+# 必填：同目錄建立 .env.console（VBS_CF_ACCESS_AUD、VBS_CF_ACCESS_TEAM_DOMAIN 或 VBS_CF_ACCESS_JWKS_URL 等，勿提交版本庫）。
 # 本機：http://127.0.0.1:5000（容器內仍為 :4000）
 services:
   console:
@@ -15,5 +15,9 @@ services:
         required: false
     environment:
       VBS_CONSOLE_HTTP_BIND: ":4000"
-      VBS_CONSOLE_JWT_TTL_SEC: "3600"
-      VBS_CF_ACCESS_MODE: service_token
+      VBS_CF_ACCESS_MODE: jwt
+      VBS_CF_ACCESS_AUD: "${VBS_CF_ACCESS_AUD:-}"
+      VBS_CF_ACCESS_TEAM_DOMAIN: "${VBS_CF_ACCESS_TEAM_DOMAIN:-}"
+      # VBS_CF_ACCESS_JWKS_URL: "https://<team-domain>/cdn-cgi/access/certs"
+      VBS_CF_JWKS_CACHE_TTL_SEC: "3600"
+      VBS_CONSOLE_NODE_OFFLINE_TTL_SEC: "10"

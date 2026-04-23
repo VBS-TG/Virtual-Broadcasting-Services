@@ -292,7 +292,7 @@ func (s *Server) handlePGMSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"VBS_ROUTE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
 		return
 	}
-	respBody, status, err := s.routeControlPOST("/api/v1/route/pgm/session", []byte(`{}`))
+	respBody, status, err := s.routeControlPOST(r.Header.Get("Authorization"), "/api/v1/route/pgm/session", []byte(`{}`))
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"route pgm session proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
 		return
@@ -331,7 +331,7 @@ func (s *Server) handleAUXSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"VBS_ROUTE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
 		return
 	}
-	respBody, status, err := s.routeControlPOST("/api/v1/route/aux/session", []byte(`{}`))
+	respBody, status, err := s.routeControlPOST(r.Header.Get("Authorization"), "/api/v1/route/aux/session", []byte(`{}`))
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"route aux session proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
 		return
@@ -384,7 +384,7 @@ func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"body required"}`, http.StatusBadRequest)
 		return
 	}
-	respBody, status, err := s.routeControlPOST("/api/v1/route/buffer", body)
+	respBody, status, err := s.routeControlPOST(r.Header.Get("Authorization"), "/api/v1/route/buffer", body)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"route buffer proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
 		return
@@ -412,8 +412,8 @@ func (s *Server) handleRouteMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"build metrics request failed"}`, http.StatusInternalServerError)
 		return
 	}
-	if token := strings.TrimSpace(s.cfg.RouteControlToken); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
+		req.Header.Set("Authorization", auth)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -461,8 +461,8 @@ func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if token := strings.TrimSpace(s.cfg.EngineControlToken); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
+		req.Header.Set("Authorization", auth)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -507,8 +507,8 @@ func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if token := strings.TrimSpace(s.cfg.EngineControlToken); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
+		req.Header.Set("Authorization", auth)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -527,7 +527,7 @@ func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path
 	_, _ = w.Write(raw)
 }
 
-func (s *Server) routeControlPOST(path string, body []byte) ([]byte, int, error) {
+func (s *Server) routeControlPOST(authorization, path string, body []byte) ([]byte, int, error) {
 	base := strings.TrimRight(s.cfg.RouteControlBaseURL, "/")
 	target := base + path
 	req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(string(body)))
@@ -535,8 +535,8 @@ func (s *Server) routeControlPOST(path string, body []byte) ([]byte, int, error)
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if token := strings.TrimSpace(s.cfg.RouteControlToken); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if auth := strings.TrimSpace(authorization); auth != "" {
+		req.Header.Set("Authorization", auth)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
