@@ -1,6 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, ChildProcessByStdio } from "node:child_process";
+import { Readable } from "node:stream";
 import { URL } from "node:url";
 import jwt from "jsonwebtoken";
 import WebSocket from "ws";
@@ -17,7 +18,7 @@ interface ProcessState {
   key: OutputKey;
   source: string;
   uri: string;
-  proc: ChildProcessWithoutNullStreams;
+  proc: ChildProcessByStdio<null, Readable, Readable>;
 }
 
 const controlToken = env("VBS_ENGINE_CONTROL_TOKEN", "");
