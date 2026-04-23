@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"vbs/apps/console/internal/auth"
@@ -31,14 +32,18 @@ type Server struct {
 	http   *http.Server
 	mux    *http.ServeMux
 	upgrader websocket.Upgrader
+
+	eventMu    sync.Mutex
+	eventConns map[*websocket.Conn]struct{}
 }
 
 // New constructs a Server from config.
 func New(cfg *config.Config) *Server {
 	s := &Server{
 		cfg: cfg,
-		hub: telemetry.NewHub(),
+		hub: telemetry.NewHub(cfg.NodeOfflineTTL),
 		mux: http.NewServeMux(),
+		eventConns: make(map[*websocket.Conn]struct{}),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -53,6 +58,7 @@ func New(cfg *config.Config) *Server {
 	}
 	s.access = access
 	s.routes()
+	go s.fanoutStatusEvents()
 	s.http = &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           s.mux,
@@ -64,6 +70,7 @@ func New(cfg *config.Config) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /vbs/telemetry/ws", s.handleTelemetryWS)
+	s.mux.HandleFunc("GET /vbs/telemetry/events/ws", s.handleTelemetryEventsWS)
 	s.mux.HandleFunc("GET /api/v1/telemetry/latest", s.handleTelemetryLatest)
 	s.mux.HandleFunc("POST /api/v1/stream/session-key", s.handleSessionKey)
 	s.mux.HandleFunc("POST /api/v1/pgm/session", s.handlePGMSession)
@@ -84,6 +91,8 @@ func (s *Server) ListenAndServe() error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.hub.Close()
+	s.closeEventConns()
 	return s.http.Shutdown(ctx)
 }
 
@@ -129,9 +138,12 @@ func (s *Server) handleTelemetryLatest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeLatest(w http.ResponseWriter) {
 	snap := s.hub.Snapshot()
+	presence := s.hub.PresenceSnapshot()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"latest": snap,
+		"latest":    snap,
+		"presence":  presence,
+		"ts_ms":     time.Now().UTC().UnixMilli(),
 	})
 }
 
@@ -180,6 +192,67 @@ func (s *Server) handleTelemetryWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+	}
+}
+
+func (s *Server) handleTelemetryEventsWS(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("events websocket upgrade: %v", err)
+		return
+	}
+	s.eventMu.Lock()
+	s.eventConns[conn] = struct{}{}
+	s.eventMu.Unlock()
+
+	defer func() {
+		s.eventMu.Lock()
+		delete(s.eventConns, conn)
+		s.eventMu.Unlock()
+		_ = conn.Close()
+	}()
+
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		return nil
+	})
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
+func (s *Server) fanoutStatusEvents() {
+	events := s.hub.SubscribeStatusEvents()
+	for ev := range events {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			continue
+		}
+		s.eventMu.Lock()
+		for conn := range s.eventConns {
+			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {
+				_ = conn.Close()
+				delete(s.eventConns, conn)
+			}
+		}
+		s.eventMu.Unlock()
+	}
+}
+
+func (s *Server) closeEventConns() {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	for conn := range s.eventConns {
+		_ = conn.Close()
+		delete(s.eventConns, conn)
 	}
 }
 

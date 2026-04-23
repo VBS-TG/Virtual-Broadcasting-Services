@@ -18,6 +18,7 @@ const (
 type Config struct {
 	ListenAddr   string
 	TelemetryMax int // max raw WS message size (bytes), default 255
+	NodeOfflineTTL time.Duration
 
 	CFAccessMode       string
 	CFAccessTeamDomain string
@@ -70,9 +71,18 @@ func Load() (*Config, error) {
 		}
 		maxPayload = n
 	}
+	offlineTTL := 10
+	if v := strings.TrimSpace(os.Getenv("VBS_CONSOLE_NODE_OFFLINE_TTL_SEC")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 3 {
+			return nil, fmt.Errorf("VBS_CONSOLE_NODE_OFFLINE_TTL_SEC must be an integer >= 3")
+		}
+		offlineTTL = n
+	}
 	return &Config{
 		ListenAddr:         listen,
 		TelemetryMax:       maxPayload,
+		NodeOfflineTTL:     time.Duration(offlineTTL) * time.Second,
 		CFAccessMode:       accessMode,
 		CFAccessTeamDomain: teamDomain,
 		CFAccessAUD:        aud,

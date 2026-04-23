@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, ChildProcessByStdio } from "node:child_process";
 import { Readable } from "node:stream";
 import { URL } from "node:url";
-import jwt from "jsonwebtoken";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import WebSocket from "ws";
 
 type OutputKey = "pgm" | "aux1" | "aux2" | "aux3" | "aux4";
@@ -21,7 +21,6 @@ interface ProcessState {
   proc: ChildProcessByStdio<null, Readable, Readable>;
 }
 
-const controlToken = env("VBS_ENGINE_CONTROL_TOKEN", "");
 const controlHost = env("VBS_ENGINE_CONTROL_BIND_HOST", "0.0.0.0");
 const controlPort = intEnv("VBS_ENGINE_CONTROL_BIND_PORT", 5010);
 
@@ -39,8 +38,17 @@ const telemetryEnabled = env("VBS_ENGINE_TELEMETRY_ENABLED", "1") !== "0" && con
 const telemetryPath = env("VBS_ENGINE_TELEMETRY_WS_PATH", "/vbs/telemetry/ws");
 const telemetryIntervalSec = Number(env("VBS_METRICS_INTERVAL_SEC", "1")) || 1;
 const nodeId = env("VBS_NODE_ID", "vbs-engine");
-const cfClientId = env("VBS_CF_ACCESS_CLIENT_ID", "");
-const cfClientSecret = env("VBS_CF_ACCESS_CLIENT_SECRET", "");
+const cfAccessJWT = env("VBS_CF_ACCESS_JWT", "");
+const cfAccessAud = requiredEnv("VBS_CF_ACCESS_AUD");
+const cfAccessTeamDomain = env("VBS_CF_ACCESS_TEAM_DOMAIN", "");
+const cfAccessJWKSURL = env("VBS_CF_ACCESS_JWKS_URL", "");
+
+const cfIssuer = resolveIssuer(cfAccessTeamDomain);
+const resolvedJWKSURL = resolveJWKSURL(cfIssuer, cfAccessJWKSURL);
+const jwksCacheSec = intEnv("VBS_CF_JWKS_CACHE_TTL_SEC", 3600);
+const remoteJWKSet = createRemoteJWKSet(new URL(resolvedJWKSURL), {
+  cacheMaxAge: Math.max(60, jwksCacheSec) * 1000,
+});
 
 const state: RuntimeState = {
   program: "input1",
@@ -107,11 +115,20 @@ function intEnv(name: string, defaultValue: number): number {
   return Number.isFinite(n) && n > 0 ? n : defaultValue;
 }
 
-function authorized(req: IncomingMessage): boolean {
-  if (!controlToken) return true;
+async function authorized(req: IncomingMessage): Promise<boolean> {
   const auth = String(req.headers.authorization ?? "");
   if (!auth.toLowerCase().startsWith("bearer ")) return false;
-  return auth.slice(7).trim() === controlToken;
+  const raw = auth.slice(7).trim();
+  if (!raw) return false;
+  try {
+    const options: { audience: string; issuer?: string } = { audience: cfAccessAud };
+    if (cfIssuer) options.issuer = cfIssuer;
+    const { payload } = await jwtVerify(raw, remoteJWKSet, options);
+    const role = String(payload.role ?? "").trim().toLowerCase();
+    return role === "admin";
+  } catch {
+    return false;
+  }
 }
 
 function inputUri(source: string): string {
@@ -204,75 +221,25 @@ function telemetryWsUrl(base: string, path: string): string {
   return u.toString();
 }
 
-async function postJson(url: string, body: unknown, bearer = "", extraHeaders: Record<string, string> = {}): Promise<any> {
-  const headers: Record<string, string> = { "Content-Type": "application/json", "User-Agent": "VBS-Engine/1.0", ...extraHeaders };
-  if (bearer) headers.Authorization = `Bearer ${bearer}`;
-  const resp = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();
-}
-
-let bearerToken = "";
-let bearerExp = 0;
-
-function decodeExp(token: string): number {
-  const payload: any = jwt.decode(token);
-  return Number(payload?.exp ?? 0);
-}
-
-async function ensureToken(): Promise<void> {
-  const now = Math.floor(Date.now() / 1000);
-  if (bearerToken && bearerExp - now > 300) return;
-  if (bearerToken) {
-    try {
-      const out = await postJson(new URL("/api/v1/auth/refresh", consoleBase).toString(), {}, bearerToken);
-      bearerToken = String(out.access_token ?? "");
-      bearerExp = Number(out.expires_at_unix ?? decodeExp(bearerToken));
-      if (bearerToken) return;
-    } catch {
-      bearerToken = "";
-      bearerExp = 0;
-    }
-  }
-  if (!cfClientId || !cfClientSecret) throw new Error("Missing VBS_CF_ACCESS_CLIENT_ID/SECRET");
-  const out = await postJson(
-    new URL("/api/v1/auth/register", consoleBase).toString(),
-    { node_id: nodeId, role: "engine", access_client_id: cfClientId, access_client_secret: cfClientSecret },
-    "",
-    {
-      "CF-Access-Client-Id": cfClientId,
-      "CF-Access-Client-Secret": cfClientSecret,
-      "X-VBS-Access-Client-Id": cfClientId,
-      "X-VBS-Access-Client-Secret": cfClientSecret,
-      "X-VBS-Node-ID": nodeId,
-    },
-  );
-  bearerToken = String(out.access_token ?? "");
-  bearerExp = Number(out.expires_at_unix ?? decodeExp(bearerToken));
-  if (!bearerToken) throw new Error("register did not return access_token");
-}
-
 async function sendTelemetryLoop(): Promise<void> {
+  if (!cfAccessJWT) throw new Error("Missing VBS_CF_ACCESS_JWT");
   const wsUrl = telemetryWsUrl(consoleBase, telemetryPath);
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   while (true) {
     try {
-      await ensureToken();
       const payload = {
         node_id: nodeId,
         node_type: "engine",
         ts_ms: Date.now(),
         metrics: { workers: processes.size, cpu_pct: 0 },
-        auth_mode: "bearer",
+        auth_mode: "cf_jwt",
       };
       const raw = JSON.stringify(payload);
       if (Buffer.byteLength(raw, "utf8") <= 255) {
         await new Promise<void>((resolve, reject) => {
           const ws = new WebSocket(wsUrl, {
             headers: {
-              Authorization: `Bearer ${bearerToken}`,
-              ...(cfClientId ? { "CF-Access-Client-Id": cfClientId, "X-VBS-Access-Client-Id": cfClientId } : {}),
-              ...(cfClientSecret ? { "CF-Access-Client-Secret": cfClientSecret, "X-VBS-Access-Client-Secret": cfClientSecret } : {}),
+              Authorization: `Bearer ${cfAccessJWT}`,
             },
           });
           ws.on("open", () => ws.send(raw));
@@ -283,10 +250,6 @@ async function sendTelemetryLoop(): Promise<void> {
       }
     } catch (err) {
       console.error(`[engine][telemetry] ${String(err)}`);
-      if (String(err).includes("401") || String(err).includes("403")) {
-        bearerToken = "";
-        bearerExp = 0;
-      }
     }
     await wait(Math.max(200, telemetryIntervalSec * 1000));
   }
@@ -299,12 +262,12 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && req.url === "/api/v1/switch/state") {
-      if (!authorized(req)) return writeJson(res, 401, { error: "unauthorized" });
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       writeJson(res, 200, state);
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/program") {
-      if (!authorized(req)) return writeJson(res, 401, { error: "unauthorized" });
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       const body = await readBody(req);
       state.program = String(body.source ?? "").trim();
       if (!state.program) return writeJson(res, 400, { error: "source required" });
@@ -313,7 +276,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/preview") {
-      if (!authorized(req)) return writeJson(res, 401, { error: "unauthorized" });
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       const body = await readBody(req);
       state.preview = String(body.source ?? "").trim();
       if (!state.preview) return writeJson(res, 400, { error: "source required" });
@@ -321,7 +284,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/aux") {
-      if (!authorized(req)) return writeJson(res, 401, { error: "unauthorized" });
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       const body = await readBody(req);
       const channel = String(body.channel ?? "");
       const source = String(body.source ?? "").trim();
@@ -356,4 +319,16 @@ if (telemetryEnabled) {
   sendTelemetryLoop().catch((err) => console.error(`[engine][telemetry] fatal ${String(err)}`));
 } else {
   console.log("[engine][telemetry] disabled");
+}
+
+function resolveIssuer(teamDomain: string): string {
+  const cleaned = teamDomain.replace(/^https?:\/\//, "").replace(/\/+$/, "").trim();
+  return cleaned ? `https://${cleaned}` : "";
+}
+
+function resolveJWKSURL(issuer: string, explicit: string): string {
+  const raw = explicit.trim();
+  if (raw) return raw;
+  if (!issuer) throw new Error("Missing VBS_CF_ACCESS_TEAM_DOMAIN or VBS_CF_ACCESS_JWKS_URL");
+  return `${issuer}/cdn-cgi/access/certs`;
 }

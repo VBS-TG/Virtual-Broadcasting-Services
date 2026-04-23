@@ -1,12 +1,16 @@
 package consoleauth
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -16,138 +20,203 @@ import (
 	"vbs/apps/route/internal/config"
 )
 
-// Provider keeps a cached JWT and refreshes it when near expiry (Cloudflare Access only).
+type Claims struct {
+	Role string `json:"role"`
+	Scope string `json:"scope"`
+	jwt.RegisteredClaims
+}
+
 type Provider struct {
 	cfg    config.Config
 	client http.Client
+	issuer string
+	aud    string
 
-	mu      sync.Mutex
-	cached  string
-	expires time.Time
+	mu        sync.RWMutex
+	keys      map[string]any
+	fetchedAt time.Time
 }
 
 func NewProvider(cfg config.Config) *Provider {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if cfg.TelemetryTLSInsecureSkipVerify {
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test-only flag
+	issuer := ""
+	if td := strings.TrimSpace(cfg.CFAccessTeamDomain); td != "" {
+		td = strings.TrimPrefix(td, "https://")
+		td = strings.TrimPrefix(td, "http://")
+		td = strings.TrimSuffix(td, "/")
+		if td != "" {
+			issuer = "https://" + td
+		}
 	}
 	return &Provider{
 		cfg: cfg,
 		client: http.Client{
-			Timeout:   8 * time.Second,
-			Transport: tr,
+			Timeout: 8 * time.Second,
 		},
+		issuer: issuer,
+		aud:    cfg.CFAccessAUD,
+		keys:   map[string]any{},
 	}
 }
 
 func (p *Provider) BearerToken(ctx context.Context) (string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	_ = ctx
+	if p.cfg.CFAccessJWT == "" {
+		return "", fmt.Errorf("VBS_CF_ACCESS_JWT is required")
+	}
+	return p.cfg.CFAccessJWT, nil
+}
 
-	if p.cached != "" && time.Until(p.expires) > 5*time.Minute {
-		return p.cached, nil
+func (p *Provider) VerifyBearer(raw string) (*Claims, error) {
+	raw = strings.TrimSpace(raw)
+	var claims Claims
+	opts := []jwt.ParserOption{jwt.WithAudience(p.aud)}
+	if p.issuer != "" {
+		opts = append(opts, jwt.WithIssuer(p.issuer))
 	}
-	if p.cached != "" && p.expires.IsZero() {
-		if exp, ok := jwtExp(p.cached); ok {
-			p.expires = exp
-			if time.Until(exp) > 5*time.Minute {
-				return p.cached, nil
-			}
+	parsed, err := jwt.ParseWithClaims(raw, &claims, func(token *jwt.Token) (any, error) {
+		kid, _ := token.Header["kid"].(string)
+		if strings.TrimSpace(kid) == "" {
+			return nil, fmt.Errorf("missing kid")
 		}
+		return p.lookupKey(kid)
+	}, opts...)
+	if err != nil {
+		return nil, err
 	}
-	if p.cached != "" {
-		if t, exp, err := p.refreshToken(ctx, p.cached); err == nil {
-			p.cached, p.expires = t, exp
-			return p.cached, nil
-		}
+	if !parsed.Valid {
+		return nil, fmt.Errorf("invalid token")
 	}
+	return &claims, nil
+}
 
-	if p.cfg.CFAccessClientID != "" && p.cfg.CFAccessClientSecret != "" {
-		token, exp, err := p.registerWithCFAccess(ctx)
+func (p *Provider) lookupKey(kid string) (any, error) {
+	if key, ok := p.cachedKey(kid); ok {
+		return key, nil
+	}
+	if err := p.refreshKeys(); err != nil {
+		return nil, err
+	}
+	if key, ok := p.cachedKey(kid); ok {
+		return key, nil
+	}
+	return nil, fmt.Errorf("unknown kid")
+}
+
+func (p *Provider) cachedKey(kid string) (any, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.keys) == 0 || time.Since(p.fetchedAt) > p.cfg.CFAccessJWKSCacheTTL {
+		return nil, false
+	}
+	key, ok := p.keys[kid]
+	return key, ok
+}
+
+type jsonWebKey struct {
+	KID string `json:"kid"`
+	KTY string `json:"kty"`
+	N   string `json:"n"`
+	E   string `json:"e"`
+	Crv string `json:"crv"`
+	X   string `json:"x"`
+	Y   string `json:"y"`
+}
+
+func (p *Provider) refreshKeys() error {
+	jwksURL := strings.TrimSpace(p.cfg.CFAccessJWKSURL)
+	if jwksURL == "" && p.issuer != "" {
+		jwksURL = p.issuer + "/cdn-cgi/access/certs"
+	}
+	if jwksURL == "" {
+		return fmt.Errorf("missing jwks url")
+	}
+	if _, err := url.Parse(jwksURL); err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodGet, jwksURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("jwks status=%d", resp.StatusCode)
+	}
+	var body struct {
+		Keys []jsonWebKey `json:"keys"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return err
+	}
+	next := make(map[string]any, len(body.Keys))
+	for _, k := range body.Keys {
+		pub, err := toPublicKey(k)
 		if err != nil {
-			return "", fmt.Errorf("cloudflare access register: %w", err)
+			continue
 		}
-		p.cached, p.expires = token, exp
-		return p.cached, nil
+		next[k.KID] = pub
 	}
-	return "", fmt.Errorf("VBS_CF_ACCESS_CLIENT_ID and VBS_CF_ACCESS_CLIENT_SECRET are required")
+	if len(next) == 0 {
+		return fmt.Errorf("no usable jwks keys")
+	}
+	p.mu.Lock()
+	p.keys = next
+	p.fetchedAt = time.Now()
+	p.mu.Unlock()
+	return nil
 }
 
-func (p *Provider) registerWithCFAccess(ctx context.Context) (string, time.Time, error) {
-	endpoint := strings.TrimRight(p.cfg.ConsoleBaseURL, "/") + "/api/v1/auth/register"
-	body := map[string]string{
-		"node_id":              p.cfg.NodeID,
-		"role":                 "route",
-		"access_client_id":     p.cfg.CFAccessClientID,
-		"access_client_secret": p.cfg.CFAccessClientSecret,
-	}
-	buf, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("CF-Access-Client-Id", p.cfg.CFAccessClientID)
-	req.Header.Set("CF-Access-Client-Secret", p.cfg.CFAccessClientSecret)
-	req.Header.Set("X-VBS-Access-Client-Id", p.cfg.CFAccessClientID)
-	req.Header.Set("X-VBS-Access-Client-Secret", p.cfg.CFAccessClientSecret)
-	req.Header.Set("X-VBS-Node-ID", p.cfg.NodeID)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", time.Time{}, fmt.Errorf("cf access register endpoint status=%d", resp.StatusCode)
-	}
-	return decodeTokenResponse(resp)
-}
-
-func (p *Provider) refreshToken(ctx context.Context, token string) (string, time.Time, error) {
-	endpoint := strings.TrimRight(p.cfg.ConsoleBaseURL, "/") + "/api/v1/auth/refresh"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader([]byte("{}")))
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", time.Time{}, fmt.Errorf("refresh endpoint status=%d", resp.StatusCode)
-	}
-	return decodeTokenResponse(resp)
-}
-
-func decodeTokenResponse(resp *http.Response) (string, time.Time, error) {
-	var out struct {
-		AccessToken string `json:"access_token"`
-		ExpiresAt   int64  `json:"expires_at_unix"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", time.Time{}, err
-	}
-	if out.AccessToken == "" {
-		return "", time.Time{}, fmt.Errorf("empty access_token")
-	}
-	exp := time.Unix(out.ExpiresAt, 0)
-	if out.ExpiresAt == 0 {
-		if t, ok := jwtExp(out.AccessToken); ok {
-			exp = t
+func toPublicKey(k jsonWebKey) (any, error) {
+	switch strings.ToUpper(strings.TrimSpace(k.KTY)) {
+	case "RSA":
+		nb, err := decodeBase64URL(k.N)
+		if err != nil {
+			return nil, err
 		}
+		eb, err := decodeBase64URL(k.E)
+		if err != nil {
+			return nil, err
+		}
+		n := new(big.Int).SetBytes(nb)
+		e := new(big.Int).SetBytes(eb)
+		if n.Sign() <= 0 || e.Sign() <= 0 {
+			return nil, fmt.Errorf("invalid rsa key")
+		}
+		return &rsa.PublicKey{N: n, E: int(e.Uint64())}, nil
+	case "EC":
+		var curve elliptic.Curve
+		switch strings.ToUpper(strings.TrimSpace(k.Crv)) {
+		case "P-256":
+			curve = elliptic.P256()
+		case "P-384":
+			curve = elliptic.P384()
+		case "P-521":
+			curve = elliptic.P521()
+		default:
+			return nil, fmt.Errorf("unsupported curve")
+		}
+		xb, err := decodeBase64URL(k.X)
+		if err != nil {
+			return nil, err
+		}
+		yb, err := decodeBase64URL(k.Y)
+		if err != nil {
+			return nil, err
+		}
+		x := new(big.Int).SetBytes(xb)
+		y := new(big.Int).SetBytes(yb)
+		if !curve.IsOnCurve(x, y) {
+			return nil, fmt.Errorf("ec point not on curve")
+		}
+		return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
+	default:
+		return nil, fmt.Errorf("unsupported key type")
 	}
-	return out.AccessToken, exp, nil
 }
 
-func jwtExp(raw string) (time.Time, bool) {
-	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	var claims jwt.RegisteredClaims
-	_, _, err := parser.ParseUnverified(raw, &claims)
-	if err != nil || claims.ExpiresAt == nil {
-		return time.Time{}, false
-	}
-	return claims.ExpiresAt.Time, true
+func decodeBase64URL(raw string) ([]byte, error) {
+	return base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
 }

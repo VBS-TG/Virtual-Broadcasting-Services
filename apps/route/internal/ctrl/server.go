@@ -3,7 +3,6 @@ package ctrl
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -333,19 +332,14 @@ func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleaut
 	if got == "" {
 		return false
 	}
-	if want := strings.TrimSpace(cfg.ControlToken); want != "" {
-		return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
-	}
 	if auth == nil {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	want, err := auth.BearerToken(ctx)
-	if err != nil || want == "" {
+	claims, err := auth.VerifyBearer(got)
+	if err != nil {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	return strings.EqualFold(strings.TrimSpace(claims.Role), "admin")
 }
 
 func randomHex(n int) string {

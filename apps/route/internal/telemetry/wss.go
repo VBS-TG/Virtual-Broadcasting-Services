@@ -46,14 +46,6 @@ func (c *WSSClient) SendOne(ctx context.Context, payload []byte) error {
 		return err
 	}
 	header.Set("Authorization", "Bearer "+token)
-	if c.cfg.CFAccessClientID != "" {
-		header.Set("CF-Access-Client-Id", c.cfg.CFAccessClientID)
-		header.Set("X-VBS-Access-Client-Id", c.cfg.CFAccessClientID)
-	}
-	if c.cfg.CFAccessClientSecret != "" {
-		header.Set("CF-Access-Client-Secret", c.cfg.CFAccessClientSecret)
-		header.Set("X-VBS-Access-Client-Secret", c.cfg.CFAccessClientSecret)
-	}
 
 	conn, resp, err := c.dialer.DialContext(ctx, wsURL, header)
 	if err != nil {

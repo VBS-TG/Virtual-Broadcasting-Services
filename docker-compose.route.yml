@@ -13,6 +13,12 @@ services:
       - VBS_LOG_LEVEL=info
       - VBS_METRICS_INTERVAL=1000ms
       - VBS_ROUTE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
+      - VBS_CF_ACCESS_JWT=${VBS_CF_ACCESS_JWT}
+      - VBS_CF_ACCESS_AUD=${VBS_CF_ACCESS_AUD}
+      # 建議擇一設定：Team Domain 或 JWKS URL
+      - VBS_CF_ACCESS_TEAM_DOMAIN=${VBS_CF_ACCESS_TEAM_DOMAIN}
+      # - VBS_CF_ACCESS_JWKS_URL=https://<team-domain>/cdn-cgi/access/certs
+      - VBS_CF_JWKS_CACHE_TTL_SEC=3600
       - VBS_ROUTE_SRTLA_INGEST_PORT=20020
       - VBS_ROUTE_SRT_OUTPUT_PORT=20030
       # PGM Relay StreamID 路由（預設 publish/read）
@@ -28,8 +34,6 @@ services:
       - VBS_ROUTE_INGEST_IFACE=eth0
       # 預設啟動控制面；若要關閉請設 VBS_ROUTE_CONTROL_BIND=
       - VBS_ROUTE_CONTROL_BIND=:20080
-      # 可選：固定控制面 Bearer token（建議與 Console 的 VBS_ROUTE_CONTROL_TOKEN 相同）
-      - VBS_ROUTE_CONTROL_TOKEN=${VBS_ROUTE_CONTROL_TOKEN}
       # 選用：行動網路 MTU（需映像內有 ip 指令，已於 Dockerfile 安裝 iproute2）
       # - VBS_ROUTE_MTU_IFACE=eth0
       # - VBS_ROUTE_MTU=1400
