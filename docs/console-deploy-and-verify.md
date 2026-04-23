@@ -1,75 +1,66 @@
-# Console 後端部署與驗證說明
+# Console 部署與驗證（ZTA / Cloudflare JWT-only）
 
-本文件描述如何驗證 **healthz**、**Cloudflare Access 節點註冊／JWT 續約**、**遙測 WebSocket** 與 **latest 快照**。
+本文件只適用於新版 ZTA：**所有 API 與 WS 一律使用 Cloudflare Access JWT**，Console 不再提供 `register` / `refresh` / `token mint` 端點。
 
 ## 前置
 
-- 於 repo 根目錄建立 **`.env.console`**（Compose 會自動載入；變數見 `protocol.md`）。
-- 至少需有：`VBS_CONSOLE_JWT_SECRET`、`VBS_CF_ACCESS_CLIENTS`；建議另有 `VBS_CONSOLE_ADMIN_TOKEN`。
-- 服務進程預設監聽 `:4000`；`docker-compose.console.yml` 將主機埠映射為 **5000**。
+- 於 repo 根目錄建立 `.env.console`（Compose 會自動載入）。
+- 至少設定：
+  - `VBS_CF_ACCESS_MODE=jwt`
+  - `VBS_CF_ACCESS_AUD=<cloudflare-access-audience>`
+  - `VBS_CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com`（或改填 `VBS_CF_ACCESS_JWKS_URL`）
+- 建議設定：
+  - `VBS_CF_JWKS_CACHE_TTL_SEC=3600`
+  - `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC=10`
+  - `VBS_CONSOLE_TELEMETRY_MAX_BYTES=255`
 
-## 1. 啟動
+## 1) 啟動 Console
 
 ```bash
 docker compose -f docker-compose.console.yml up --build
 ```
 
-## 2. Health
+## 2) Health 檢查
 
 ```bash
 curl -sS http://127.0.0.1:5000/healthz
 # 預期：{"status":"ok"}
 ```
 
-## 3. 取得 JWT（管理者，除錯／維運）
-
-```bash
-curl -sS -X POST http://127.0.0.1:5000/api/v1/auth/token \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <VBS_CONSOLE_ADMIN_TOKEN>" \
-  -d '{"node_id":"vbs-route-01","role":"route"}'
-```
-
-## 4. 節點註冊（Cloudflare Access）
-
-```bash
-curl -sS -X POST http://127.0.0.1:5000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -H "CF-Access-Client-Id: <與 VBS_CF_ACCESS_CLIENTS 一致之 client id>" \
-  -H "CF-Access-Client-Secret: <對應 secret>" \
-  -H "X-VBS-Node-ID: vbs-route-01" \
-  -d '{"node_id":"vbs-route-01","role":"route"}'
-```
-
-續約：
-
-```bash
-curl -sS -X POST http://127.0.0.1:5000/api/v1/auth/refresh \
-  -H "Authorization: Bearer <old_jwt>"
-```
-
-## 5. WebSocket 遙測
-
-Upgrade 請求帶 `Authorization: Bearer <access_token>`；單筆 JSON ≤255 bytes（見 `protocol.md`）。
-
-## 6. 查詢最新快照
+## 3) 驗證管理端查詢（admin JWT）
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/v1/telemetry/latest \
-  -H "Authorization: Bearer <VBS_CONSOLE_ADMIN_TOKEN 或 admin JWT>"
+  -H "Authorization: Bearer <cloudflare-access-jwt-with-role-admin>"
 ```
 
-## 7. Route 對接
+成功時回傳每個節點最新遙測與 `presence` 狀態。
 
-- `VBS_CONSOLE_BASE_URL=http://127.0.0.1:5000`（或 Tunnel 後的 `https://api.example.com`）
-- `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET`（與本 Console 的 `VBS_CF_ACCESS_CLIENTS` 映射一致）
+## 4) 驗證節點遙測上報（node JWT）
 
----
+節點需連到 `GET /vbs/telemetry/ws`，Upgrade 時攜帶：
 
-**限制**：無完整 RBAC、持久化；生產環境請以安全管道注入密鑰並縮短 TTL。
+- `Authorization: Bearer <cloudflare-access-jwt-with-role-route|engine|capture|console>`
 
----
+驗證通過後，Console 會更新節點快照並標記 `online`。
 
-## 驗證備註
+## 5) 驗證 Graceful Offline 事件
 
-- 有 **Go 1.22+** 時：`go build -o console-server ./apps/console/cmd/console-server`（於 repo 根目錄）。
+管理端（`role=admin`）訂閱：
+
+```bash
+wscat -c ws://127.0.0.1:5000/vbs/telemetry/events/ws \
+  -H "Authorization: Bearer <cloudflare-access-jwt-with-role-admin>"
+```
+
+當節點超過 `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC` 未更新遙測時，會收到 `node_offline` 事件；恢復後會收到 `node_online`。
+
+## 6) Route / Engine 對接重點
+
+- Route / Engine 對 Console 一律帶 `Authorization: Bearer <VBS_CF_ACCESS_JWT>`。
+- Route / Engine 控制面由 Console 代理時，Console 會轉發呼叫者原始 JWT（不再使用任何固定 control token）。
+
+## 備註
+
+- 生產環境應由安全管道注入 `VBS_CF_ACCESS_JWT` 與 Access 策略。
+- JWKS 採記憶體快取，避免每請求拉取公鑰；未知 `kid` 會觸發立即刷新。

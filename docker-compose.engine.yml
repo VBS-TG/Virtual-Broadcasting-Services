@@ -36,10 +36,10 @@ services:
       - VBS_ENGINE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
       - VBS_METRICS_INTERVAL_SEC=1
       - VBS_NODE_ID=vbs-engine
-      - VBS_CF_ACCESS_JWT=${VBS_CF_ACCESS_JWT}
-      - VBS_CF_ACCESS_AUD=${VBS_CF_ACCESS_AUD}
+      - VBS_CF_ACCESS_JWT=${VBS_CF_ACCESS_JWT:-}
+      - VBS_CF_ACCESS_AUD=${VBS_CF_ACCESS_AUD:-}
       # 建議擇一設定：Team Domain 或 JWKS URL
-      - VBS_CF_ACCESS_TEAM_DOMAIN=${VBS_CF_ACCESS_TEAM_DOMAIN}
+      - VBS_CF_ACCESS_TEAM_DOMAIN=${VBS_CF_ACCESS_TEAM_DOMAIN:-}
       # - VBS_CF_ACCESS_JWKS_URL=https://<team-domain>/cdn-cgi/access/certs
       - VBS_CF_JWKS_CACHE_TTL_SEC=3600
       - VBS_ENGINE_CONTROL_API_ENABLED=1

@@ -27,10 +27,8 @@ type Config struct {
 	CFAccessJWKSCacheTTL time.Duration
 
 	RouteControlBaseURL  string
-	RouteControlToken    string
 	PGMDefaultLatencyMs  int
 	EngineControlBaseURL string
-	EngineControlToken   string
 }
 
 // Load reads configuration from environment variables.
@@ -89,10 +87,8 @@ func Load() (*Config, error) {
 		CFAccessJWKSURL:    jwksURL,
 		CFAccessJWKSCacheTTL: time.Duration(jwksTTL) * time.Second,
 		RouteControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_BASE_URL")),
-		RouteControlToken:   strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_TOKEN")),
 		PGMDefaultLatencyMs: getenvIntDefault("VBS_PGM_DEFAULT_LATENCY_MS", 200),
 		EngineControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ENGINE_CONTROL_BASE_URL")),
-		EngineControlToken:   strings.TrimSpace(os.Getenv("VBS_ENGINE_CONTROL_TOKEN")),
 	}, nil
 }
 
