@@ -24,8 +24,16 @@ interface ProcessState {
 const controlHost = env("VBS_ENGINE_CONTROL_BIND_HOST", "0.0.0.0");
 const controlPort = intEnv("VBS_ENGINE_CONTROL_BIND_PORT", 5010);
 
-const input1 = requiredEnv("VBS_ENGINE_SRT_INPUT_1_URI");
-const input2 = requiredEnv("VBS_ENGINE_SRT_INPUT_2_URI");
+const inputs: Record<string, string> = {
+  input1: requiredEnv("VBS_ENGINE_SRT_INPUT_1_URI"),
+  input2: requiredEnv("VBS_ENGINE_SRT_INPUT_2_URI"),
+  input3: requiredEnv("VBS_ENGINE_SRT_INPUT_3_URI"),
+  input4: requiredEnv("VBS_ENGINE_SRT_INPUT_4_URI"),
+  input5: requiredEnv("VBS_ENGINE_SRT_INPUT_5_URI"),
+  input6: requiredEnv("VBS_ENGINE_SRT_INPUT_6_URI"),
+  input7: requiredEnv("VBS_ENGINE_SRT_INPUT_7_URI"),
+  input8: requiredEnv("VBS_ENGINE_SRT_INPUT_8_URI"),
+};
 
 const relayHost = env("VBS_ROUTE_PGM_RELAY_HOST", "");
 const relayPort = intEnv("VBS_ROUTE_PGM_RELAY_PORT", 20030);
@@ -63,8 +71,8 @@ const state: RuntimeState = {
   aux: {
     "1": "input1",
     "2": "input2",
-    "3": "input1",
-    "4": "input2",
+    "3": "input3",
+    "4": "input4",
   },
 };
 
@@ -240,8 +248,7 @@ async function parseEd25519PublicKey(raw: string): Promise<KeyLike> {
 }
 
 function inputUri(source: string): string {
-  if (source === "input1") return input1;
-  if (source === "input2") return input2;
+  if (inputs[source]) return inputs[source];
   if (source.startsWith("srt://")) return source;
   throw new Error(`unsupported source: ${source}`);
 }
