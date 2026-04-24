@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, ChildProcessByStdio } from "node:child_process";
 import { Readable } from "node:stream";
 import { URL } from "node:url";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, importSPKI, jwtVerify, type KeyLike, type JWTPayload } from "jose";
 import WebSocket from "ws";
 
 type OutputKey = "pgm" | "aux1" | "aux2" | "aux3" | "aux4";
@@ -42,6 +42,10 @@ const cfAccessJWT = env("VBS_CF_ACCESS_JWT", "");
 const cfAccessAud = requiredEnv("VBS_CF_ACCESS_AUD");
 const cfAccessTeamDomain = env("VBS_CF_ACCESS_TEAM_DOMAIN", "");
 const cfAccessJWKSURL = env("VBS_CF_ACCESS_JWKS_URL", "");
+const adminEmails = splitCSVLower(env("VBS_ADMIN_EMAILS", ""));
+const nodeCNPrefix = env("VBS_NODE_CN_PREFIX", "vbs-node-").toLowerCase();
+const consoleJWTIssuer = env("VBS_CONSOLE_JWT_ISSUER", "vbs-console");
+const consoleJWTPublicKeys = splitCSVRaw(env("VBS_CONSOLE_JWT_PUBLIC_KEYS", ""));
 
 const cfIssuer = resolveIssuer(cfAccessTeamDomain);
 const resolvedJWKSURL = resolveJWKSURL(cfIssuer, cfAccessJWKSURL);
@@ -49,6 +53,7 @@ const jwksCacheSec = intEnv("VBS_CF_JWKS_CACHE_TTL_SEC", 3600);
 const remoteJWKSet = createRemoteJWKSet(new URL(resolvedJWKSURL), {
   cacheMaxAge: Math.max(60, jwksCacheSec) * 1000,
 });
+const consolePublicKeyLoaders = consoleJWTPublicKeys.map((k) => parseEd25519PublicKey(k));
 
 const state: RuntimeState = {
   program: "input1",
@@ -120,15 +125,113 @@ async function authorized(req: IncomingMessage): Promise<boolean> {
   if (!auth.toLowerCase().startsWith("bearer ")) return false;
   const raw = auth.slice(7).trim();
   if (!raw) return false;
+  const role = await resolveRoleFromToken(raw);
+  return role === "admin" || role === "operator";
+}
+
+async function resolveRoleFromToken(raw: string): Promise<string> {
   try {
-    const options: { audience: string; issuer?: string } = { audience: cfAccessAud };
-    if (cfIssuer) options.issuer = cfIssuer;
-    const { payload } = await jwtVerify(raw, remoteJWKSet, options);
-    const role = String(payload.role ?? "").trim().toLowerCase();
-    return role === "admin";
+    const payload = decodePayload(raw);
+    const iss = String(payload.iss ?? "").trim();
+    if (iss && iss === consoleJWTIssuer) {
+      return await resolveConsoleRole(raw);
+    }
+    return await resolveCloudflareRole(raw);
+  } catch {
+    return "";
+  }
+}
+
+async function resolveCloudflareRole(raw: string): Promise<string> {
+  const options: { audience: string; issuer?: string } = { audience: cfAccessAud };
+  if (cfIssuer) options.issuer = cfIssuer;
+  const { payload } = await jwtVerify(raw, remoteJWKSet, options);
+  const role = String(payload.role ?? "").trim().toLowerCase();
+  if (role) return role;
+  const email = String(payload.email ?? "").trim().toLowerCase();
+  const commonName = String(payload.common_name ?? "").trim().toLowerCase();
+  if (adminEmails.includes(email)) return "admin";
+  if (commonName.startsWith(nodeCNPrefix)) return "node";
+  return "";
+}
+
+async function resolveConsoleRole(raw: string): Promise<string> {
+  for (const loader of consolePublicKeyLoaders) {
+    try {
+      const key = await loader;
+      const { payload } = await jwtVerify(raw, key, {
+        issuer: consoleJWTIssuer,
+        audience: cfAccessAud,
+      });
+      const role = String(payload.role ?? "").trim().toLowerCase();
+      if (role === "operator") {
+        const subject = String(payload.sub ?? "").trim();
+        const guestId = subject.startsWith("guest:") ? subject.slice("guest:".length) : "";
+        const sessionVersion = Number(payload.sv ?? 0);
+        const active = await introspectGuestSession(guestId, sessionVersion);
+        if (!active) return "";
+      }
+      return role;
+    } catch {
+      // try next key
+    }
+  }
+  return "";
+}
+
+async function introspectGuestSession(guestId: string, sessionVersion: number): Promise<boolean> {
+  if (!guestId || !consoleBase || !cfAccessJWT) return false;
+  try {
+    const base = consoleBase.replace(/\/+$/, "");
+    const res = await fetch(`${base}/api/v1/guest/introspect`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${cfAccessJWT}`,
+      },
+      body: JSON.stringify({
+        guest_id: guestId,
+        session_version: sessionVersion,
+      }),
+    });
+    if (!res.ok) return false;
+    const out = (await res.json()) as { active?: boolean };
+    return out.active === true;
   } catch {
     return false;
   }
+}
+
+function decodePayload(raw: string): JWTPayload {
+  const parts = raw.split(".");
+  if (parts.length < 2) return {};
+  const json = Buffer.from(parts[1], "base64url").toString("utf8");
+  return JSON.parse(json) as JWTPayload;
+}
+
+function splitCSVLower(raw: string): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+}
+
+function splitCSVRaw(raw: string): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function normalizePEM(raw: string): string {
+  return raw.replace(/\\n/g, "\n").trim();
+}
+
+async function parseEd25519PublicKey(raw: string): Promise<KeyLike> {
+  const pem = normalizePEM(raw);
+  return importSPKI(pem, "EdDSA");
 }
 
 function inputUri(source: string): string {

@@ -339,7 +339,8 @@ func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleaut
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(claims.Role), "admin")
+	role := strings.TrimSpace(strings.ToLower(claims.Role))
+	return role == "admin" || role == "operator"
 }
 
 func randomHex(n int) string {

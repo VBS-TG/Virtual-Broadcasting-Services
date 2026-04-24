@@ -19,6 +19,10 @@ services:
       - VBS_CF_ACCESS_TEAM_DOMAIN=${VBS_CF_ACCESS_TEAM_DOMAIN:-}
       # - VBS_CF_ACCESS_JWKS_URL=https://<team-domain>/cdn-cgi/access/certs
       - VBS_CF_JWKS_CACHE_TTL_SEC=3600
+      - VBS_ADMIN_EMAILS=${VBS_ADMIN_EMAILS:-}
+      - VBS_NODE_CN_PREFIX=${VBS_NODE_CN_PREFIX:-vbs-node-}
+      - VBS_CONSOLE_JWT_ISSUER=${VBS_CONSOLE_JWT_ISSUER:-vbs-console}
+      - VBS_CONSOLE_JWT_PUBLIC_KEYS=${VBS_CONSOLE_JWT_PUBLIC_KEYS:-}
       - VBS_ROUTE_SRTLA_INGEST_PORT=20020
       - VBS_ROUTE_SRT_OUTPUT_PORT=20030
       # PGM Relay StreamID 路由（預設 publish/read）

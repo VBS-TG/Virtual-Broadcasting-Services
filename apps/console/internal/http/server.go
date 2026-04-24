@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,6 +36,17 @@ type Server struct {
 
 	eventMu    sync.Mutex
 	eventConns map[*websocket.Conn]struct{}
+	guestStore *guestStore
+}
+
+type guestSession struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	PIN            string `json:"pin"`
+	SessionVersion int    `json:"session_version"`
+	Revoked        bool   `json:"revoked"`
+	CreatedAt      int64  `json:"created_at"`
+	ExpiresAt      int64  `json:"expires_at"`
 }
 
 // New constructs a Server from config.
@@ -52,7 +64,23 @@ func New(cfg *config.Config) *Server {
 			},
 		},
 	}
-	access, err := auth.NewAccessJWTVerifier(cfg.CFAccessMode, cfg.CFAccessTeamDomain, cfg.CFAccessAUD, cfg.CFAccessJWKSURL, cfg.CFAccessJWKSCacheTTL)
+	store, err := openGuestStore(cfg.GuestDBPath)
+	if err != nil {
+		log.Fatalf("guest store init failed: %v", err)
+	}
+	s.guestStore = store
+	access, err := auth.NewAccessJWTVerifier(
+		cfg.CFAccessMode,
+		cfg.CFAccessTeamDomain,
+		cfg.CFAccessAUD,
+		cfg.CFAccessJWKSURL,
+		cfg.CFAccessJWKSCacheTTL,
+		cfg.AdminEmails,
+		cfg.NodeCNPrefix,
+		cfg.ConsoleJWTIssuer,
+		cfg.ConsoleJWTPrivateKey,
+		cfg.ConsoleJWTPublicKeys,
+	)
 	if err != nil {
 		log.Fatalf("access verifier init failed: %v", err)
 	}
@@ -81,6 +109,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/switch/preview", s.handleSwitchPreview)
 	s.mux.HandleFunc("POST /api/v1/switch/aux", s.handleSwitchAUX)
 	s.mux.HandleFunc("GET /api/v1/switch/state", s.handleSwitchState)
+	s.mux.HandleFunc("POST /api/v1/guest/sessions", s.handleGuestSessionCreate)
+	s.mux.HandleFunc("DELETE /api/v1/guest/sessions/{id}", s.handleGuestSessionDelete)
+	s.mux.HandleFunc("POST /api/v1/guest/exchange-pin", s.handleGuestExchangePIN)
+	s.mux.HandleFunc("POST /api/v1/guest/introspect", s.handleGuestIntrospect)
 }
 
 // ListenAndServe starts the HTTP server.
@@ -93,6 +125,9 @@ func (s *Server) ListenAndServe() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.hub.Close()
 	s.closeEventConns()
+	if s.guestStore != nil {
+		_ = s.guestStore.Close()
+	}
 	return s.http.Shutdown(ctx)
 }
 
@@ -128,8 +163,23 @@ func (s *Server) adminAuthorized(r *http.Request) bool {
 	return auth.IsAdminRole(claims.Role)
 }
 
+func (s *Server) controlAuthorized(r *http.Request) bool {
+	claims, err := s.access.VerifyRequest(r)
+	if err != nil {
+		return false
+	}
+	if !auth.CanControlPlane(claims.Role) {
+		return false
+	}
+	if claims.Role == "operator" {
+		guestID := strings.TrimPrefix(strings.TrimSpace(claims.Subject), "guest:")
+		return s.guestStore.ValidateTokenSession(guestID, claims.SessionVersion)
+	}
+	return true
+}
+
 func (s *Server) handleTelemetryLatest(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuthorized(r) {
+	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -196,7 +246,7 @@ func (s *Server) handleTelemetryWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTelemetryEventsWS(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuthorized(r) {
+	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -284,7 +334,7 @@ type auxSessionResponse struct {
 }
 
 func (s *Server) handlePGMSession(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuthorized(r) {
+	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -323,7 +373,7 @@ func (s *Server) handlePGMSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAUXSession(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuthorized(r) {
+	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -367,7 +417,7 @@ func (s *Server) handleAUXSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuthorized(r) {
+	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -397,7 +447,7 @@ func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRouteMetrics(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuthorized(r) {
+	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -445,7 +495,7 @@ func (s *Server) handleSwitchAUX(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
-	if !s.adminAuthorized(r) {
+	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -482,7 +532,7 @@ func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path string) {
-	if !s.adminAuthorized(r) {
+	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
@@ -525,6 +575,164 @@ func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(raw)
+}
+
+func (s *Server) handleGuestSessionCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+		TTLSeconds int `json:"ttl_seconds"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, maxTokenBodyBytes)).Decode(&body)
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		name = "guest"
+	}
+	ttl := s.cfg.GuestTokenTTL
+	if body.TTLSeconds > 0 {
+		ttl = time.Duration(body.TTLSeconds) * time.Second
+	}
+	id := randomToken(12)
+	pin := randomDigits(6)
+	now := time.Now().UTC()
+	session := guestSession{
+		ID: id,
+		Name: name,
+		PIN: pin,
+		SessionVersion: 1,
+		CreatedAt: now.Unix(),
+		ExpiresAt: now.Add(ttl).Unix(),
+	}
+	if err := s.guestStore.Create(session); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"store guest session failed: %s"}`, trimErr(err)), http.StatusInternalServerError)
+		return
+	}
+	token, err := s.access.MintGuestToken("guest:"+id, "control:basic telemetry:read", ttl, session.SessionVersion)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"mint guest token failed: %s"}`, trimErr(err)), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"id": session.ID,
+		"name": session.Name,
+		"pin": session.PIN,
+		"expires_at": session.ExpiresAt,
+		"access_token": token,
+		"token_type": "Bearer",
+		"magic_link": fmt.Sprintf("/guest?pin=%s", session.PIN),
+	})
+}
+
+func (s *Server) handleGuestSessionDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+		return
+	}
+	if err := s.guestStore.Delete(id); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"delete guest session failed: %s"}`, trimErr(err)), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"deleted":true}`))
+}
+
+func (s *Server) handleGuestExchangePIN(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PIN string `json:"pin"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxTokenBodyBytes)).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+	pin := strings.TrimSpace(body.PIN)
+	if len(pin) != 6 {
+		http.Error(w, `{"error":"invalid pin"}`, http.StatusBadRequest)
+		return
+	}
+	session, err := s.guestStore.GetByPIN(pin)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"pin expired or invalid"}`, http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, fmt.Sprintf(`{"error":"lookup pin failed: %s"}`, trimErr(err)), http.StatusInternalServerError)
+		return
+	}
+	if session.Revoked || time.Now().UTC().Unix() > session.ExpiresAt {
+		http.Error(w, `{"error":"pin expired or invalid"}`, http.StatusUnauthorized)
+		return
+	}
+	ttl := time.Until(time.Unix(session.ExpiresAt, 0))
+	token, err := s.access.MintGuestToken("guest:"+session.ID, "control:basic telemetry:read", ttl, session.SessionVersion)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"mint guest token failed: %s"}`, trimErr(err)), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"access_token": token,
+		"token_type": "Bearer",
+		"expires_at": session.ExpiresAt,
+	})
+}
+
+func (s *Server) handleGuestIntrospect(w http.ResponseWriter, r *http.Request) {
+	claims, err := s.access.VerifyRequest(r)
+	if err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if !(auth.IsTelemetryRole(claims.Role) || auth.CanControlPlane(claims.Role)) {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
+	var body struct {
+		GuestID        string `json:"guest_id"`
+		SessionVersion int    `json:"session_version"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxTokenBodyBytes)).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+	ok := s.guestStore.ValidateTokenSession(strings.TrimSpace(body.GuestID), body.SessionVersion)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"active": ok,
+	})
+}
+
+func randomToken(n int) string {
+	if n <= 0 {
+		n = 12
+	}
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UTC().UnixNano())
+	}
+	return base64.RawURLEncoding.EncodeToString(buf)
+}
+
+func randomDigits(n int) string {
+	if n <= 0 {
+		n = 6
+	}
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "000000"
+	}
+	for i := range b {
+		b[i] = '0' + (b[i] % 10)
+	}
+	return string(b)
 }
 
 func (s *Server) routeControlPOST(authorization, path string, body []byte) ([]byte, int, error) {

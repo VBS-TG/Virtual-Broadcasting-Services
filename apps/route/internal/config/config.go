@@ -24,6 +24,10 @@ type Config struct {
 	CFAccessAUD         string
 	CFAccessJWKSURL     string
 	CFAccessJWKSCacheTTL time.Duration
+	AdminEmails         []string
+	NodeCNPrefix        string
+	ConsoleJWTIssuer    string
+	ConsoleJWTPublicKeys []string
 
 	// WSS 遙測路徑（相對於 Console 主機），預設見 Load。
 	TelemetryWSPath string
@@ -69,6 +73,10 @@ const (
 	envCFAccessAUD = "VBS_CF_ACCESS_AUD"
 	envCFAccessJWKSURL = "VBS_CF_ACCESS_JWKS_URL"
 	envCFAccessJWKSCacheTTL = "VBS_CF_JWKS_CACHE_TTL_SEC"
+	envAdminEmails = "VBS_ADMIN_EMAILS"
+	envNodeCNPrefix = "VBS_NODE_CN_PREFIX"
+	envConsoleJWTIssuer = "VBS_CONSOLE_JWT_ISSUER"
+	envConsoleJWTPublicKeys = "VBS_CONSOLE_JWT_PUBLIC_KEYS"
 	envTelemetryPath  = "VBS_ROUTE_TELEMETRY_WS_PATH"
 	envTLSInsecure    = "VBS_ROUTE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY"
 
@@ -105,6 +113,10 @@ func Load() Config {
 		CFAccessTeamDomain: strings.TrimSpace(os.Getenv(envCFAccessTeamDomain)),
 		CFAccessAUD: strings.TrimSpace(os.Getenv(envCFAccessAUD)),
 		CFAccessJWKSURL: strings.TrimSpace(os.Getenv(envCFAccessJWKSURL)),
+		AdminEmails: splitCSVLower(os.Getenv(envAdminEmails)),
+		NodeCNPrefix: strings.TrimSpace(strings.ToLower(getenvOrDefault(envNodeCNPrefix, "vbs-node-"))),
+		ConsoleJWTIssuer: strings.TrimSpace(getenvOrDefault(envConsoleJWTIssuer, "vbs-console")),
+		ConsoleJWTPublicKeys: splitCSVRaw(os.Getenv(envConsoleJWTPublicKeys)),
 		TelemetryWSPath: getenvOrDefault(envTelemetryPath, "/vbs/telemetry/ws"),
 	}
 	cacheTTL := getenvIntOrDefault(envCFAccessJWKSCacheTTL, 3600)
@@ -205,6 +217,18 @@ func (c Config) Validate() error {
 	if c.CFAccessTeamDomain == "" && c.CFAccessJWKSURL == "" {
 		return fmt.Errorf("需設定 VBS_CF_ACCESS_TEAM_DOMAIN 或 VBS_CF_ACCESS_JWKS_URL")
 	}
+	if len(c.AdminEmails) == 0 {
+		return fmt.Errorf("需設定 VBS_ADMIN_EMAILS")
+	}
+	if c.NodeCNPrefix == "" {
+		return fmt.Errorf("需設定 VBS_NODE_CN_PREFIX")
+	}
+	if c.ConsoleJWTIssuer == "" {
+		return fmt.Errorf("需設定 VBS_CONSOLE_JWT_ISSUER")
+	}
+	if len(c.ConsoleJWTPublicKeys) == 0 {
+		return fmt.Errorf("需設定 VBS_CONSOLE_JWT_PUBLIC_KEYS")
+	}
 	if c.SRTLAIngestPort <= 0 || c.SRTOutputPort <= 0 || c.InternalSRTPort <= 0 {
 		return fmt.Errorf("Route 埠號必須為正整數")
 	}
@@ -255,4 +279,28 @@ func getenvFloatOrDefault(key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+func splitCSVLower(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(strings.ToLower(p))
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func splitCSVRaw(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

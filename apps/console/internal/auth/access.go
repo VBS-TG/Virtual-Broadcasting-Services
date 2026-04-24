@@ -3,9 +3,12 @@ package auth
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -18,22 +21,32 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// AccessClaims contains normalized identity data from Cloudflare Access JWT.
 type AccessClaims struct {
-	Subject string
-	NodeID  string
-	Role    string
-	Scope   string
-	Audience []string
+	Subject    string
+	NodeID     string
+	Role       string
+	Scope      string
+	Issuer     string
+	Email      string
+	CommonName string
+	TokenID    string
+	SessionVersion int
+	ExpiresAtUnix int64
+	Audience   []string
 }
 
 type AccessJWTVerifier struct {
-	mode       string
-	issuer     string
-	aud        string
-	jwksURL    string
-	cacheTTL   time.Duration
-	httpClient *http.Client
+	mode          string
+	cfIssuer      string
+	cfAud         string
+	cfJWKSURL     string
+	cacheTTL      time.Duration
+	httpClient    *http.Client
+	adminEmailSet map[string]struct{}
+	nodeCNPrefix  string
+	consoleIssuer string
+	consolePubKeys []ed25519.PublicKey
+	consolePrivKey ed25519.PrivateKey
 
 	mu        sync.RWMutex
 	keys      map[string]any
@@ -41,13 +54,16 @@ type AccessJWTVerifier struct {
 }
 
 type accessJWTClaims struct {
-	NodeID string `json:"node_id"`
-	Role   string `json:"role"`
-	Scope  string `json:"scope"`
+	NodeID     string `json:"node_id"`
+	Role       string `json:"role"`
+	Scope      string `json:"scope"`
+	Email      string `json:"email"`
+	CommonName string `json:"common_name"`
+	SessionVersion int `json:"sv"`
 	jwt.RegisteredClaims
 }
 
-func NewAccessJWTVerifier(mode, teamDomain, aud, jwksURL string, cacheTTL time.Duration) (*AccessJWTVerifier, error) {
+func NewAccessJWTVerifier(mode, teamDomain, aud, jwksURL string, cacheTTL time.Duration, adminEmails []string, nodeCNPrefix, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if mode == "" {
 		mode = "jwt"
@@ -58,25 +74,61 @@ func NewAccessJWTVerifier(mode, teamDomain, aud, jwksURL string, cacheTTL time.D
 	if strings.TrimSpace(aud) == "" {
 		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD is required")
 	}
-	issuer, resolvedJWKSURL, err := resolveIssuerAndJWKS(teamDomain, jwksURL)
+	cfIssuer, resolvedJWKSURL, err := resolveIssuerAndJWKS(teamDomain, jwksURL)
 	if err != nil {
 		return nil, err
 	}
 	if cacheTTL <= 0 {
 		cacheTTL = time.Hour
 	}
+	adminSet := make(map[string]struct{}, len(adminEmails))
+	for _, e := range adminEmails {
+		e = strings.TrimSpace(strings.ToLower(e))
+		if e != "" {
+			adminSet[e] = struct{}{}
+		}
+	}
+	if len(adminSet) == 0 {
+		return nil, fmt.Errorf("admin emails cannot be empty")
+	}
+	nodeCNPrefix = strings.TrimSpace(strings.ToLower(nodeCNPrefix))
+	if nodeCNPrefix == "" {
+		return nil, fmt.Errorf("node common_name prefix is required")
+	}
+	consoleIssuer = strings.TrimSpace(consoleIssuer)
+	if consoleIssuer == "" {
+		return nil, fmt.Errorf("console issuer is required")
+	}
+	pubKeys := make([]ed25519.PublicKey, 0, len(consolePublicKeys))
+	for _, k := range consolePublicKeys {
+		pub, err := parseEd25519PublicKey(k)
+		if err == nil {
+			pubKeys = append(pubKeys, pub)
+		}
+	}
+	if len(pubKeys) == 0 {
+		return nil, fmt.Errorf("console public keys are required")
+	}
+	priv, err := parseEd25519PrivateKey(consolePrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid console private key: %w", err)
+	}
+
 	return &AccessJWTVerifier{
-		mode:       mode,
-		issuer:     issuer,
-		aud:        strings.TrimSpace(aud),
-		jwksURL:    resolvedJWKSURL,
-		cacheTTL:   cacheTTL,
-		httpClient: &http.Client{Timeout: 8 * time.Second},
-		keys:       map[string]any{},
+		mode:          mode,
+		cfIssuer:      cfIssuer,
+		cfAud:         strings.TrimSpace(aud),
+		cfJWKSURL:     resolvedJWKSURL,
+		cacheTTL:      cacheTTL,
+		httpClient:    &http.Client{Timeout: 8 * time.Second},
+		adminEmailSet: adminSet,
+		nodeCNPrefix:  nodeCNPrefix,
+		consoleIssuer: consoleIssuer,
+		consolePubKeys: pubKeys,
+		consolePrivKey: priv,
+		keys:          map[string]any{},
 	}, nil
 }
-
-func (v *AccessJWTVerifier) Mode() string { return v.mode }
 
 func (v *AccessJWTVerifier) VerifyRequest(r *http.Request) (*AccessClaims, error) {
 	return v.VerifyBearer(r.Header.Get("Authorization"))
@@ -96,9 +148,21 @@ func (v *AccessJWTVerifier) VerifyBearer(header string) (*AccessClaims, error) {
 
 func (v *AccessJWTVerifier) VerifyToken(raw string) (*AccessClaims, error) {
 	var claims accessJWTClaims
-	opts := []jwt.ParserOption{jwt.WithAudience(v.aud)}
-	if v.issuer != "" {
-		opts = append(opts, jwt.WithIssuer(v.issuer))
+	_, _, err := new(jwt.Parser).ParseUnverified(raw, &claims)
+	if err != nil {
+		return nil, fmt.Errorf("parse token failed: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(claims.Issuer), v.consoleIssuer) {
+		return v.verifyConsoleToken(raw)
+	}
+	return v.verifyCloudflareToken(raw)
+}
+
+func (v *AccessJWTVerifier) verifyCloudflareToken(raw string) (*AccessClaims, error) {
+	var claims accessJWTClaims
+	opts := []jwt.ParserOption{jwt.WithAudience(v.cfAud)}
+	if v.cfIssuer != "" {
+		opts = append(opts, jwt.WithIssuer(v.cfIssuer))
 	}
 	parsed, err := jwt.ParseWithClaims(raw, &claims, func(token *jwt.Token) (any, error) {
 		kid, _ := token.Header["kid"].(string)
@@ -113,22 +177,118 @@ func (v *AccessJWTVerifier) VerifyToken(raw string) (*AccessClaims, error) {
 	if !parsed.Valid {
 		return nil, fmt.Errorf("invalid token")
 	}
-	role := strings.TrimSpace(strings.ToLower(claims.Role))
+
 	sub := strings.TrimSpace(claims.Subject)
+	email := strings.TrimSpace(strings.ToLower(claims.Email))
+	cn := strings.TrimSpace(strings.ToLower(claims.CommonName))
+	if sub == "" {
+		sub = cn
+	}
+	if sub == "" && email == "" && cn == "" {
+		return nil, fmt.Errorf("missing subject identity")
+	}
+	role := v.mapCloudflareRole(email, cn)
+	if role == "" {
+		return nil, fmt.Errorf("identity not allowed")
+	}
 	nodeID := strings.TrimSpace(claims.NodeID)
 	if nodeID == "" {
 		nodeID = sub
 	}
-	if sub == "" || role == "" {
-		return nil, fmt.Errorf("missing required claims")
-	}
 	return &AccessClaims{
-		Subject:  sub,
-		NodeID:   nodeID,
-		Role:     role,
-		Scope:    strings.TrimSpace(claims.Scope),
-		Audience: []string(claims.Audience),
+		Subject:    sub,
+		NodeID:     nodeID,
+		Role:       role,
+		Scope:      strings.TrimSpace(claims.Scope),
+		Issuer:     strings.TrimSpace(claims.Issuer),
+		Email:      email,
+		CommonName: cn,
+		Audience:   []string(claims.Audience),
 	}, nil
+}
+
+func (v *AccessJWTVerifier) verifyConsoleToken(raw string) (*AccessClaims, error) {
+	var lastErr error
+	for _, key := range v.consolePubKeys {
+		var claims accessJWTClaims
+		parsed, err := jwt.ParseWithClaims(raw, &claims, func(token *jwt.Token) (any, error) {
+			return key, nil
+		}, jwt.WithIssuer(v.consoleIssuer), jwt.WithAudience(v.cfAud))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !parsed.Valid {
+			lastErr = fmt.Errorf("invalid token")
+			continue
+		}
+		sub := strings.TrimSpace(claims.Subject)
+		role := strings.TrimSpace(strings.ToLower(claims.Role))
+		if sub == "" || role == "" {
+			lastErr = fmt.Errorf("missing required claims")
+			continue
+		}
+		expUnix := int64(0)
+		if claims.ExpiresAt != nil {
+			expUnix = claims.ExpiresAt.Time.Unix()
+		}
+		return &AccessClaims{
+			Subject:    sub,
+			NodeID:     strings.TrimSpace(claims.NodeID),
+			Role:       role,
+			Scope:      strings.TrimSpace(claims.Scope),
+			Issuer:     strings.TrimSpace(claims.Issuer),
+			Email:      strings.TrimSpace(strings.ToLower(claims.Email)),
+			CommonName: strings.TrimSpace(strings.ToLower(claims.CommonName)),
+			TokenID:    strings.TrimSpace(claims.ID),
+			SessionVersion: claims.SessionVersion,
+			ExpiresAtUnix: expUnix,
+			Audience:   []string(claims.Audience),
+		}, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("console token verification failed")
+	}
+	return nil, lastErr
+}
+
+func (v *AccessJWTVerifier) MintGuestToken(subject, scope string, ttl time.Duration, sessionVersion int) (string, error) {
+	if ttl <= 0 {
+		ttl = 10 * time.Minute
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return "", fmt.Errorf("subject required")
+	}
+	now := time.Now().UTC()
+	claims := accessJWTClaims{
+		Role:  "operator",
+		Scope: strings.TrimSpace(scope),
+		SessionVersion: sessionVersion,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    v.consoleIssuer,
+			Subject:   subject,
+			ID:        randomID(),
+			Audience:  jwt.ClaimStrings{v.cfAud},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	return token.SignedString(v.consolePrivKey)
+}
+
+func (v *AccessJWTVerifier) mapCloudflareRole(email, commonName string) string {
+	if email != "" {
+		if _, ok := v.adminEmailSet[email]; ok {
+			return "admin"
+		}
+	}
+	if strings.HasPrefix(commonName, v.nodeCNPrefix) {
+		return "node"
+	}
+	return ""
 }
 
 func (v *AccessJWTVerifier) lookupKey(kid string) (any, error) {
@@ -151,17 +311,14 @@ func (v *AccessJWTVerifier) cachedKey(kid string) (any, bool) {
 		return nil, false
 	}
 	key, ok := v.keys[kid]
-	if !ok {
-		return nil, false
-	}
-	if time.Since(v.fetchedAt) > v.cacheTTL {
+	if !ok || time.Since(v.fetchedAt) > v.cacheTTL {
 		return nil, false
 	}
 	return key, true
 }
 
 func (v *AccessJWTVerifier) refreshKeys(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.jwksURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.cfJWKSURL, nil)
 	if err != nil {
 		return err
 	}
@@ -259,6 +416,68 @@ func toPublicKey(k jsonWebKey) (any, error) {
 
 func decodeBase64URL(raw string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
+}
+
+func parseEd25519PrivateKey(raw string) (ed25519.PrivateKey, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("empty private key")
+	}
+	if block, _ := pem.Decode([]byte(raw)); block != nil {
+		key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		ed, ok := key.(ed25519.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("not ed25519 private key")
+		}
+		return ed, nil
+	}
+	buf, err := base64.RawStdEncoding.DecodeString(raw)
+	if err != nil {
+		buf, err = base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(buf) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("invalid ed25519 private key length")
+	}
+	return ed25519.PrivateKey(buf), nil
+}
+
+func parseEd25519PublicKey(raw string) (ed25519.PublicKey, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("empty public key")
+	}
+	if block, _ := pem.Decode([]byte(raw)); block != nil {
+		key, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		ed, ok := key.(ed25519.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("not ed25519 public key")
+		}
+		return ed, nil
+	}
+	buf, err := base64.RawStdEncoding.DecodeString(raw)
+	if err != nil {
+		buf, err = base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(buf) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("invalid ed25519 public key length")
+	}
+	return ed25519.PublicKey(buf), nil
+}
+
+func randomID() string {
+	return fmt.Sprintf("%d", time.Now().UTC().UnixNano())
 }
 
 func resolveIssuerAndJWKS(teamDomain, jwksURL string) (string, string, error) {

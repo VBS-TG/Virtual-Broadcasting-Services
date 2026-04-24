@@ -18,6 +18,13 @@ if [[ "${VBS_ENGINE_TELEMETRY_ENABLED:-1}" != "0" ]]; then
   fi
 fi
 
+if [[ "${VBS_ENGINE_CONTROL_API_ENABLED:-1}" != "0" ]]; then
+  if [[ -z "${VBS_ADMIN_EMAILS:-}" || -z "${VBS_CONSOLE_JWT_PUBLIC_KEYS:-}" ]]; then
+    echo "錯誤: 啟用控制面驗證時需設定 VBS_ADMIN_EMAILS 與 VBS_CONSOLE_JWT_PUBLIC_KEYS" >&2
+    exit 1
+  fi
+fi
+
 echo "[vbs-engine] 啟動 Eyevinn TypeScript engine core..."
 exec node /opt/vbs-engine/dist/index.js
 

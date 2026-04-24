@@ -52,7 +52,7 @@
 | Route-SRT-Internal / 20021 | UDP/SRT | 本機 127.0.0.1 | — | Route 內部 |
 | Route-SRT-Out / 20030 | UDP/SRT | `srt://<DNS 或域名>:20030` Listener | —（媒體層 passphrase） | Route → Engine |
 | Route-Telemetry | WSS | 由 `VBS_CONSOLE_BASE_URL` + `VBS_ROUTE_TELEMETRY_WS_PATH` 衍生之 `wss://…` | `Authorization: Bearer <Cloudflare Access JWT>` | Route → Console Hub |
-| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | `/healthz` 無；其餘 `Authorization: Bearer <Cloudflare Access JWT>`（`role=admin`） | Console / 維運 → Route |
+| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | `/healthz` 無；其餘 `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發；需通過本地映射為 admin/operator） | Console / 維運 → Route |
 
 ### Route-Telemetry Payload
 
@@ -69,7 +69,7 @@
 
 ### Route-Control：`POST /api/v1/route/buffer`
 
-**Headers**：`Authorization: Bearer <Cloudflare Access JWT>`（`role=admin`），`Content-Type: application/json`
+**Headers**：`Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發；需通過本地映射為 admin/operator），`Content-Type: application/json`
 
 ```json
 {
@@ -99,10 +99,11 @@
 | `VBS_ENGINE_MIXER_HEIGHT` | 否 | 預設 `480` |
 | `VBS_ENGINE_CONTROL_BIND_HOST` / `VBS_ENGINE_CONTROL_BIND_PORT` | 否 | Engine 切換盤 API 監聽位址，預設 `0.0.0.0:5010`。 |
 | `VBS_CF_ACCESS_JWT` | 是 | Engine telemetry 上報與控制 API 驗證使用的 Cloudflare Access JWT（Bearer）。 |
-| `VBS_CF_ACCESS_AUD` | 是 | Cloudflare Access JWT audience（Engine 控制 API 驗簽用）。 |
+| `VBS_CF_ACCESS_AUD` | 是 | Cloudflare Access JWT audience（Single AUD，Engine 控制 API 驗簽用）。 |
 | `VBS_CF_ACCESS_TEAM_DOMAIN` | 條件必填 | Cloudflare team domain（若未提供 `VBS_CF_ACCESS_JWKS_URL` 則必填）。 |
 | `VBS_CF_ACCESS_JWKS_URL` | 條件必填 | Cloudflare JWKS URL（若未提供 `VBS_CF_ACCESS_TEAM_DOMAIN` 則必填）。 |
 | `VBS_CF_JWKS_CACHE_TTL_SEC` | 否 | JWKS 記憶體快取秒數，預設 `3600`。 |
+| `VBS_CONSOLE_JWT_PUBLIC_KEYS` | 條件必填 | 驗證 Console 簽發 Guest JWT 的公鑰集合（啟用 Guest 雙軌信任時必填）。 |
 | `VBS_CONSOLE_BASE_URL` | 否 | 設定後啟用 Engine telemetry，以上報至 Console `wss://.../vbs/telemetry/ws`。 |
 | `VBS_ENGINE_TELEMETRY_ENABLED` | 否 | 預設 `1`；設 `0` 關閉 telemetry。 |
 | `VBS_ENGINE_TELEMETRY_WS_PATH` | 否 | 預設 `/vbs/telemetry/ws`。 |
@@ -147,10 +148,16 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest** 與 **節點
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
 | `VBS_CF_ACCESS_MODE` | 是 | 固定 `jwt`（ZTA 模式）。 |
-| `VBS_CF_ACCESS_AUD` | 是 | Cloudflare Access JWT audience。 |
+| `VBS_CF_ACCESS_AUD` | 是 | Cloudflare Access JWT audience（Single AUD）。 |
 | `VBS_CF_ACCESS_TEAM_DOMAIN` | 條件必填 | Cloudflare team domain（若未提供 `VBS_CF_ACCESS_JWKS_URL` 則必填）。 |
 | `VBS_CF_ACCESS_JWKS_URL` | 條件必填 | Cloudflare JWKS URL（若未提供 `VBS_CF_ACCESS_TEAM_DOMAIN` 則必填）。 |
 | `VBS_CF_JWKS_CACHE_TTL_SEC` | 否 | JWKS 記憶體快取秒數，預設 `3600`。 |
+| `VBS_ADMIN_EMAILS` | 是 | Admin 本地映射白名單（Cloudflare JWT 驗簽後以 email 對名冊）。 |
+| `VBS_NODE_CN_PREFIX` | 是 | 系統節點本地映射前綴（例如 `vbs-node-`；以 `common_name` 對規則）。 |
+| `VBS_CONSOLE_JWT_ISSUER` | 是 | Console 簽發 Guest JWT 的 issuer。 |
+| `VBS_CONSOLE_JWT_PRIVATE_KEY` | 是 | Console 簽發 Guest JWT 私鑰（建議非對稱）。 |
+| `VBS_CONSOLE_JWT_PUBLIC_KEYS` | 是 | Console 與節點驗證 Guest JWT 的公鑰集合（支援輪替）。 |
+| `VBS_GUEST_TOKEN_TTL_SEC` | 否 | Guest JWT 有效期（建議短效，如 `600` 秒）。 |
 | `VBS_CONSOLE_HTTP_BIND` | 否 | 預設 `:4000`。 |
 | `VBS_CONSOLE_TELEMETRY_MAX_BYTES` | 否 | 單筆 WS 訊息上限，預設 `255`（與 1Hz／≤255B 規範一致）。 |
 | `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC` | 否 | 節點離線判定秒數，預設 `10`（最小 `3`）。 |
@@ -160,16 +167,17 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest** 與 **節點
 | Service / Port | Protocol | Endpoint | Auth Mode | Node Context |
 | --- | --- | --- | --- | --- |
 | Console-HTTP / 4000 | HTTP | `GET /healthz` | 無 | 健康檢查 |
-| Console-Telemetry | WS/WSS | `GET /vbs/telemetry/ws`（Upgrade） | `Authorization: Bearer <Cloudflare Access JWT>`；`role` 須為 `capture`／`route`／`engine`／`console` | Route/Engine/Capture → Console |
-| Console-Telemetry-Events | WS/WSS | `GET /vbs/telemetry/events/ws`（Upgrade） | `Authorization: Bearer <Cloudflare Access JWT>`；`role=admin` | Console → UI（online/offline 狀態事件） |
-| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <Cloudflare Access JWT>`；`role=admin` | 讀取每節點最近一次遙測（內存 + presence） |
-| Console-HTTP / 4000 | HTTP | `POST /api/v1/stream/session-key` | `Authorization: Bearer <Cloudflare Access JWT>`；`role=admin` | 生成當次直播 SRT AES-256 passphrase |
+| Console-Telemetry | WS/WSS | `GET /vbs/telemetry/ws`（Upgrade） | `Authorization: Bearer <Cloudflare Access JWT>`；驗簽後以 `common_name` 前綴映射為 node 身分 | Route/Engine/Capture → Console |
+| Console-Telemetry-Events | WS/WSS | `GET /vbs/telemetry/events/ws`（Upgrade） | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/operator | Console → UI（online/offline 狀態事件） |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/operator | 讀取每節點最近一次遙測（內存 + presence） |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/stream/session-key` | `Authorization: Bearer <Cloudflare Access JWT>`；需映射為 admin | 生成當次直播 SRT AES-256 passphrase |
 
 ### JWT（ZTA）
 
-- 單一信物：Cloudflare Access JWT（不再由 Console 簽發）。
-- 驗證方式：以 Cloudflare JWKS 驗簽，採記憶體快取（預設 1h）。
-- 節點權杖：`role` 為 `capture`／`route`／`engine`／`console`；管理端需 `role=admin`。
+- 外部門禁：Cloudflare Access Single AUD（Admin/Nodes）。
+- 內部臨時授權：Console 可簽發短效 Guest JWT（PIN/魔術連結對應租約）。
+- 驗證方式：Cloudflare JWT 以 JWKS 驗簽（記憶體快取預設 1h）；Console JWT 以本地公鑰驗簽。
+- 權限決策：先驗 `iss/aud/exp/nbf`，再以本地名冊/規則映射（admin / node / guest-operator）。
 - 去註冊化：節點連線即驗證、驗證通過即更新狀態，不再有 register/refresh API。
 
 ### 本機驗證

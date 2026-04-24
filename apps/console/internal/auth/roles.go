@@ -3,6 +3,7 @@ package auth
 import "strings"
 
 var telemetrySenderRoles = map[string]struct{}{
+	"node":    {},
 	"capture": {},
 	"route":   {},
 	"engine":  {},
@@ -17,4 +18,13 @@ func IsTelemetryRole(role string) bool {
 
 func IsAdminRole(role string) bool {
 	return strings.EqualFold(strings.TrimSpace(role), "admin")
+}
+
+func IsOperatorRole(role string) bool {
+	return strings.EqualFold(strings.TrimSpace(role), "operator")
+}
+
+func CanControlPlane(role string) bool {
+	role = strings.TrimSpace(strings.ToLower(role))
+	return role == "admin" || role == "operator"
 }

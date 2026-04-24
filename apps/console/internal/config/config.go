@@ -25,6 +25,14 @@ type Config struct {
 	CFAccessAUD        string
 	CFAccessJWKSURL    string
 	CFAccessJWKSCacheTTL time.Duration
+	AdminEmails        []string
+	NodeCNPrefix       string
+
+	ConsoleJWTIssuer     string
+	ConsoleJWTPrivateKey string
+	ConsoleJWTPublicKeys []string
+	GuestTokenTTL        time.Duration
+	GuestDBPath          string
 
 	RouteControlBaseURL  string
 	PGMDefaultLatencyMs  int
@@ -77,6 +85,29 @@ func Load() (*Config, error) {
 		}
 		offlineTTL = n
 	}
+	adminEmails := splitCSVLower(os.Getenv("VBS_ADMIN_EMAILS"))
+	if len(adminEmails) == 0 {
+		return nil, fmt.Errorf("VBS_ADMIN_EMAILS is required")
+	}
+	nodePrefix := strings.TrimSpace(os.Getenv("VBS_NODE_CN_PREFIX"))
+	if nodePrefix == "" {
+		return nil, fmt.Errorf("VBS_NODE_CN_PREFIX is required")
+	}
+	consoleIssuer := strings.TrimSpace(getenvDefault("VBS_CONSOLE_JWT_ISSUER", "vbs-console"))
+	consolePriv := strings.TrimSpace(os.Getenv("VBS_CONSOLE_JWT_PRIVATE_KEY"))
+	if consolePriv == "" {
+		return nil, fmt.Errorf("VBS_CONSOLE_JWT_PRIVATE_KEY is required")
+	}
+	consolePub := splitCSVRaw(os.Getenv("VBS_CONSOLE_JWT_PUBLIC_KEYS"))
+	if len(consolePub) == 0 {
+		return nil, fmt.Errorf("VBS_CONSOLE_JWT_PUBLIC_KEYS is required")
+	}
+	guestTTL := getenvIntDefault("VBS_GUEST_TOKEN_TTL_SEC", 600)
+	if guestTTL < 60 {
+		return nil, fmt.Errorf("VBS_GUEST_TOKEN_TTL_SEC must be >= 60")
+	}
+	guestDBPath := strings.TrimSpace(getenvDefault("VBS_GUEST_DB_PATH", "data/console-guests.db"))
+
 	return &Config{
 		ListenAddr:         listen,
 		TelemetryMax:       maxPayload,
@@ -86,6 +117,13 @@ func Load() (*Config, error) {
 		CFAccessAUD:        aud,
 		CFAccessJWKSURL:    jwksURL,
 		CFAccessJWKSCacheTTL: time.Duration(jwksTTL) * time.Second,
+		AdminEmails:        adminEmails,
+		NodeCNPrefix:       nodePrefix,
+		ConsoleJWTIssuer:   consoleIssuer,
+		ConsoleJWTPrivateKey: consolePriv,
+		ConsoleJWTPublicKeys: consolePub,
+		GuestTokenTTL:      time.Duration(guestTTL) * time.Second,
+		GuestDBPath:        guestDBPath,
 		RouteControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_BASE_URL")),
 		PGMDefaultLatencyMs: getenvIntDefault("VBS_PGM_DEFAULT_LATENCY_MS", 200),
 		EngineControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ENGINE_CONTROL_BASE_URL")),
@@ -106,4 +144,28 @@ func getenvIntDefault(key string, def int) int {
 		}
 	}
 	return def
+}
+
+func splitCSVLower(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(strings.ToLower(p))
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func splitCSVRaw(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
