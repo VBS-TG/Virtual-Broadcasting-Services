@@ -426,7 +426,7 @@ func decodeBase64URL(raw string) ([]byte, error) {
 }
 
 func parseEd25519PrivateKey(raw string) (ed25519.PrivateKey, error) {
-	raw = strings.TrimSpace(raw)
+	raw = normalizeKeyInput(raw)
 	if raw == "" {
 		return nil, fmt.Errorf("empty private key")
 	}
@@ -455,7 +455,7 @@ func parseEd25519PrivateKey(raw string) (ed25519.PrivateKey, error) {
 }
 
 func parseEd25519PublicKey(raw string) (ed25519.PublicKey, error) {
-	raw = strings.TrimSpace(raw)
+	raw = normalizeKeyInput(raw)
 	if raw == "" {
 		return nil, fmt.Errorf("empty public key")
 	}
@@ -481,6 +481,13 @@ func parseEd25519PublicKey(raw string) (ed25519.PublicKey, error) {
 		return nil, fmt.Errorf("invalid ed25519 public key length")
 	}
 	return ed25519.PublicKey(buf), nil
+}
+
+func normalizeKeyInput(raw string) string {
+	v := strings.TrimSpace(raw)
+	v = strings.Trim(v, `"'`)
+	v = strings.ReplaceAll(v, `\n`, "\n")
+	return strings.TrimSpace(v)
 }
 
 func randomID() string {
