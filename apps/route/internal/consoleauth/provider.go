@@ -91,6 +91,24 @@ func (p *Provider) BearerToken(ctx context.Context) (string, error) {
 	return p.cfg.CFAccessJWT, nil
 }
 
+func (p *Provider) ApplyAccessHeaders(header http.Header) error {
+	if header == nil {
+		return fmt.Errorf("nil header")
+	}
+	if jwt := strings.TrimSpace(p.cfg.CFAccessJWT); jwt != "" {
+		header.Set("Authorization", "Bearer "+jwt)
+		return nil
+	}
+	clientID := strings.TrimSpace(p.cfg.CFAccessClientID)
+	clientSecret := strings.TrimSpace(p.cfg.CFAccessClientSecret)
+	if clientID != "" && clientSecret != "" {
+		header.Set("Cf-Access-Client-Id", clientID)
+		header.Set("Cf-Access-Client-Secret", clientSecret)
+		return nil
+	}
+	return fmt.Errorf("cloudflare access credentials missing")
+}
+
 func (p *Provider) VerifyBearer(raw string) (*Claims, error) {
 	raw = strings.TrimSpace(raw)
 	var claims Claims
@@ -167,7 +185,7 @@ func (p *Provider) verifyConsoleBearer(raw string) (*Claims, error) {
 
 func (p *Provider) introspectGuest(guestID string, sessionVersion int) bool {
 	base := strings.TrimRight(strings.TrimSpace(p.cfg.ConsoleBaseURL), "/")
-	if base == "" || p.cfg.CFAccessJWT == "" {
+	if base == "" {
 		return false
 	}
 	payload, _ := json.Marshal(map[string]any{
@@ -179,7 +197,9 @@ func (p *Provider) introspectGuest(guestID string, sessionVersion int) bool {
 		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.cfg.CFAccessJWT)
+	if err := p.ApplyAccessHeaders(req.Header); err != nil {
+		return false
+	}
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return false

@@ -20,6 +20,8 @@ type Config struct {
 	// Console 控制平面（HTTPS 基底網址，用於衍生 WSS 遙測 URL）
 	ConsoleBaseURL string
 	CFAccessJWT         string
+	CFAccessClientID    string
+	CFAccessClientSecret string
 	CFAccessTeamDomain  string
 	CFAccessAUD         string
 	CFAccessJWKSURL     string
@@ -69,6 +71,8 @@ const (
 
 	envConsoleBaseURL = "VBS_CONSOLE_BASE_URL"
 	envCFAccessJWT = "VBS_CF_ACCESS_JWT"
+	envCFAccessClientID = "VBS_CF_ACCESS_CLIENT_ID"
+	envCFAccessClientSecret = "VBS_CF_ACCESS_CLIENT_SECRET"
 	envCFAccessTeamDomain = "VBS_CF_ACCESS_TEAM_DOMAIN"
 	envCFAccessAUD = "VBS_CF_ACCESS_AUD"
 	envCFAccessJWKSURL = "VBS_CF_ACCESS_JWKS_URL"
@@ -110,6 +114,8 @@ func Load() Config {
 
 		ConsoleBaseURL: strings.TrimSpace(os.Getenv(envConsoleBaseURL)),
 		CFAccessJWT: strings.TrimSpace(os.Getenv(envCFAccessJWT)),
+		CFAccessClientID: strings.TrimSpace(os.Getenv(envCFAccessClientID)),
+		CFAccessClientSecret: strings.TrimSpace(os.Getenv(envCFAccessClientSecret)),
 		CFAccessTeamDomain: strings.TrimSpace(os.Getenv(envCFAccessTeamDomain)),
 		CFAccessAUD: strings.TrimSpace(os.Getenv(envCFAccessAUD)),
 		CFAccessJWKSURL: strings.TrimSpace(os.Getenv(envCFAccessJWKSURL)),
@@ -208,8 +214,8 @@ func (c Config) Validate() error {
 	if c.ConsoleBaseURL == "" {
 		return fmt.Errorf("VBS_CONSOLE_BASE_URL 為必填（Console 控制平面 HTTPS 基底）")
 	}
-	if c.CFAccessJWT == "" {
-		return fmt.Errorf("需設定 VBS_CF_ACCESS_JWT（Cloudflare Access JWT）")
+	if c.CFAccessJWT == "" && (c.CFAccessClientID == "" || c.CFAccessClientSecret == "") {
+		return fmt.Errorf("需設定 VBS_CF_ACCESS_JWT，或同時設定 VBS_CF_ACCESS_CLIENT_ID 與 VBS_CF_ACCESS_CLIENT_SECRET")
 	}
 	if c.CFAccessAUD == "" {
 		return fmt.Errorf("需設定 VBS_CF_ACCESS_AUD")

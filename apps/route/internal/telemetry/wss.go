@@ -41,11 +41,9 @@ func (c *WSSClient) SendOne(ctx context.Context, payload []byte) error {
 	}
 
 	header := http.Header{}
-	token, err := c.auth.BearerToken(ctx)
-	if err != nil {
+	if err := c.auth.ApplyAccessHeaders(header); err != nil {
 		return err
 	}
-	header.Set("Authorization", "Bearer "+token)
 
 	conn, resp, err := c.dialer.DialContext(ctx, wsURL, header)
 	if err != nil {
