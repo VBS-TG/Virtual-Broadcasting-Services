@@ -39,6 +39,8 @@ const telemetryPath = env("VBS_ENGINE_TELEMETRY_WS_PATH", "/vbs/telemetry/ws");
 const telemetryIntervalSec = Number(env("VBS_METRICS_INTERVAL_SEC", "1")) || 1;
 const nodeId = env("VBS_NODE_ID", "vbs-engine");
 const cfAccessJWT = env("VBS_CF_ACCESS_JWT", "");
+const cfAccessClientID = env("VBS_CF_ACCESS_CLIENT_ID", "");
+const cfAccessClientSecret = env("VBS_CF_ACCESS_CLIENT_SECRET", "");
 const cfAccessAud = requiredEnv("VBS_CF_ACCESS_AUD");
 const cfAccessTeamDomain = env("VBS_CF_ACCESS_TEAM_DOMAIN", "");
 const cfAccessJWKSURL = env("VBS_CF_ACCESS_JWKS_URL", "");
@@ -180,14 +182,15 @@ async function resolveConsoleRole(raw: string): Promise<string> {
 }
 
 async function introspectGuestSession(guestId: string, sessionVersion: number): Promise<boolean> {
-  if (!guestId || !consoleBase || !cfAccessJWT) return false;
+  if (!guestId || !consoleBase) return false;
   try {
     const base = consoleBase.replace(/\/+$/, "");
+    const authHeaders = accessHeaders();
     const res = await fetch(`${base}/api/v1/guest/introspect`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${cfAccessJWT}`,
+        ...authHeaders,
       },
       body: JSON.stringify({
         guest_id: guestId,
@@ -325,7 +328,7 @@ function telemetryWsUrl(base: string, path: string): string {
 }
 
 async function sendTelemetryLoop(): Promise<void> {
-  if (!cfAccessJWT) throw new Error("Missing VBS_CF_ACCESS_JWT");
+  const authHeaders = accessHeaders();
   const wsUrl = telemetryWsUrl(consoleBase, telemetryPath);
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   while (true) {
@@ -341,9 +344,7 @@ async function sendTelemetryLoop(): Promise<void> {
       if (Buffer.byteLength(raw, "utf8") <= 255) {
         await new Promise<void>((resolve, reject) => {
           const ws = new WebSocket(wsUrl, {
-            headers: {
-              Authorization: `Bearer ${cfAccessJWT}`,
-            },
+            headers: authHeaders,
           });
           ws.on("open", () => ws.send(raw));
           ws.on("message", () => undefined);
@@ -356,6 +357,21 @@ async function sendTelemetryLoop(): Promise<void> {
     }
     await wait(Math.max(200, telemetryIntervalSec * 1000));
   }
+}
+
+function accessHeaders(): Record<string, string> {
+  if (cfAccessJWT) {
+    return {
+      Authorization: `Bearer ${cfAccessJWT}`,
+    };
+  }
+  if (cfAccessClientID && cfAccessClientSecret) {
+    return {
+      "Cf-Access-Client-Id": cfAccessClientID,
+      "Cf-Access-Client-Secret": cfAccessClientSecret,
+    };
+  }
+  throw new Error("Missing Cloudflare Access credentials: set VBS_CF_ACCESS_JWT or VBS_CF_ACCESS_CLIENT_ID/VBS_CF_ACCESS_CLIENT_SECRET");
 }
 
 const server = createServer(async (req, res) => {

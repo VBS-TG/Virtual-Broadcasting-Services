@@ -12,8 +12,12 @@ if [[ -z "${VBS_SRT_PASSPHRASE:-}" ]]; then
 fi
 
 if [[ "${VBS_ENGINE_TELEMETRY_ENABLED:-1}" != "0" ]]; then
-  if [[ -z "${VBS_CF_ACCESS_JWT:-}" || -z "${VBS_CF_ACCESS_AUD:-}" ]]; then
-    echo "錯誤: 啟用 telemetry 時需設定 VBS_CF_ACCESS_JWT 與 VBS_CF_ACCESS_AUD" >&2
+  if [[ -z "${VBS_CF_ACCESS_AUD:-}" ]]; then
+    echo "錯誤: 啟用 telemetry 時需設定 VBS_CF_ACCESS_AUD" >&2
+    exit 1
+  fi
+  if [[ -z "${VBS_CF_ACCESS_JWT:-}" && ( -z "${VBS_CF_ACCESS_CLIENT_ID:-}" || -z "${VBS_CF_ACCESS_CLIENT_SECRET:-}" ) ]]; then
+    echo "錯誤: 啟用 telemetry 時需設定 VBS_CF_ACCESS_JWT，或同時設定 VBS_CF_ACCESS_CLIENT_ID 與 VBS_CF_ACCESS_CLIENT_SECRET" >&2
     exit 1
   fi
 fi
