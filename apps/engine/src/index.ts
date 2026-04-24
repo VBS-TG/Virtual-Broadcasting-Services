@@ -121,9 +121,9 @@ function intEnv(name: string, defaultValue: number): number {
 }
 
 async function authorized(req: IncomingMessage): Promise<boolean> {
-  const auth = String(req.headers.authorization ?? "");
-  if (!auth.toLowerCase().startsWith("bearer ")) return false;
-  const raw = auth.slice(7).trim();
+  const cfAssertion = String(req.headers["cf-access-jwt-assertion"] ?? "").trim();
+  const auth = String(req.headers.authorization ?? "").trim();
+  const raw = cfAssertion || (auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "");
   if (!raw) return false;
   const role = await resolveRoleFromToken(raw);
   return role === "admin" || role === "operator";

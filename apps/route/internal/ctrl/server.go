@@ -324,11 +324,14 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 }
 
 func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleauth.Provider) bool {
-	h := strings.TrimSpace(r.Header.Get("Authorization"))
-	if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
-		return false
+	got := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion"))
+	if got == "" {
+		h := strings.TrimSpace(r.Header.Get("Authorization"))
+		if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
+			return false
+		}
+		got = strings.TrimSpace(h[7:])
 	}
-	got := strings.TrimSpace(h[7:])
 	if got == "" {
 		return false
 	}

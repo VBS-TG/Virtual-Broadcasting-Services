@@ -342,7 +342,7 @@ func (s *Server) handlePGMSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"VBS_ROUTE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
 		return
 	}
-	respBody, status, err := s.routeControlPOST(r.Header.Get("Authorization"), "/api/v1/route/pgm/session", []byte(`{}`))
+	respBody, status, err := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/pgm/session", []byte(`{}`))
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"route pgm session proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
 		return
@@ -381,7 +381,7 @@ func (s *Server) handleAUXSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"VBS_ROUTE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
 		return
 	}
-	respBody, status, err := s.routeControlPOST(r.Header.Get("Authorization"), "/api/v1/route/aux/session", []byte(`{}`))
+	respBody, status, err := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/aux/session", []byte(`{}`))
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"route aux session proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
 		return
@@ -434,7 +434,7 @@ func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"body required"}`, http.StatusBadRequest)
 		return
 	}
-	respBody, status, err := s.routeControlPOST(r.Header.Get("Authorization"), "/api/v1/route/buffer", body)
+	respBody, status, err := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/buffer", body)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"route buffer proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
 		return
@@ -462,7 +462,7 @@ func (s *Server) handleRouteMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"build metrics request failed"}`, http.StatusInternalServerError)
 		return
 	}
-	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
+	if auth := strings.TrimSpace(incomingAuthHeader(r)); auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -511,7 +511,7 @@ func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
+	if auth := strings.TrimSpace(incomingAuthHeader(r)); auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -557,7 +557,7 @@ func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
+	if auth := strings.TrimSpace(incomingAuthHeader(r)); auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -757,4 +757,21 @@ func (s *Server) routeControlPOST(authorization, path string, body []byte) ([]by
 		return nil, resp.StatusCode, err
 	}
 	return raw, resp.StatusCode, nil
+}
+
+func incomingAuthHeader(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if cfJWT := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion")); cfJWT != "" {
+		return "Bearer " + cfJWT
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if auth == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+		return auth
+	}
+	return ""
 }

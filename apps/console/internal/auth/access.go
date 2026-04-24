@@ -131,6 +131,9 @@ func NewAccessJWTVerifier(mode, teamDomain, aud, jwksURL string, cacheTTL time.D
 }
 
 func (v *AccessJWTVerifier) VerifyRequest(r *http.Request) (*AccessClaims, error) {
+	if cfJWT := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion")); cfJWT != "" {
+		return v.VerifyToken(cfJWT)
+	}
 	return v.VerifyBearer(r.Header.Get("Authorization"))
 }
 
