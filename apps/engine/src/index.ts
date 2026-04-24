@@ -154,6 +154,8 @@ async function resolveCloudflareRole(raw: string): Promise<string> {
   const commonName = String(payload.common_name ?? "").trim().toLowerCase();
   if (adminEmails.includes(email)) return "admin";
   if (commonName.startsWith(nodeCNPrefix)) return "node";
+  // Cloudflare Service Token 常見以 "<client_id>.access" 形式出現在 common_name。
+  if (commonName.endsWith(".access")) return "node";
   return "";
 }
 

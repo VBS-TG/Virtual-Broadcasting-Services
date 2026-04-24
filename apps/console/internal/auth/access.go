@@ -291,6 +291,10 @@ func (v *AccessJWTVerifier) mapCloudflareRole(email, commonName string) string {
 	if strings.HasPrefix(commonName, v.nodeCNPrefix) {
 		return "node"
 	}
+	// Cloudflare Service Token 常見以 "<client_id>.access" 形式出現在 common_name。
+	if strings.HasSuffix(commonName, ".access") {
+		return "node"
+	}
 	return ""
 }
 
