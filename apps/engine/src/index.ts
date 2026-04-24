@@ -21,19 +21,23 @@ interface ProcessState {
   proc: ChildProcessByStdio<null, Readable, Readable>;
 }
 
+interface RuntimeConfig {
+  inputs: number;
+  pgm_count: number;
+  aux_count: number;
+  input_sources?: string[];
+  aux_sources?: Record<string, string>;
+}
+
 const controlHost = env("VBS_ENGINE_CONTROL_BIND_HOST", "0.0.0.0");
 const controlPort = intEnv("VBS_ENGINE_CONTROL_BIND_PORT", 5010);
 
-const inputs: Record<string, string> = {
-  input1: requiredEnv("VBS_ENGINE_SRT_INPUT_1_URI"),
-  input2: requiredEnv("VBS_ENGINE_SRT_INPUT_2_URI"),
-  input3: requiredEnv("VBS_ENGINE_SRT_INPUT_3_URI"),
-  input4: requiredEnv("VBS_ENGINE_SRT_INPUT_4_URI"),
-  input5: requiredEnv("VBS_ENGINE_SRT_INPUT_5_URI"),
-  input6: requiredEnv("VBS_ENGINE_SRT_INPUT_6_URI"),
-  input7: requiredEnv("VBS_ENGINE_SRT_INPUT_7_URI"),
-  input8: requiredEnv("VBS_ENGINE_SRT_INPUT_8_URI"),
-};
+const defaultInputs: Record<string, string> = {};
+for (let i = 1; i <= 8; i += 1) {
+  const uri = env(`VBS_ENGINE_SRT_INPUT_${i}_URI`, "");
+  if (uri) defaultInputs[`input${i}`] = uri;
+}
+let activeInputs: Record<string, string> = { ...defaultInputs };
 
 const relayHost = env("VBS_ROUTE_PGM_RELAY_HOST", "");
 const relayPort = intEnv("VBS_ROUTE_PGM_RELAY_PORT", 20030);
@@ -66,14 +70,19 @@ const remoteJWKSet = createRemoteJWKSet(new URL(resolvedJWKSURL), {
 const consolePublicKeyLoaders = consoleJWTPublicKeys.map((k) => parseEd25519PublicKey(k));
 
 const state: RuntimeState = {
-  program: "input1",
-  preview: "input2",
+  program: "",
+  preview: "",
   aux: {
-    "1": "input1",
-    "2": "input2",
-    "3": "input3",
-    "4": "input4",
+    "1": "",
+    "2": "",
+    "3": "",
+    "4": "",
   },
+};
+let runtimeConfig: RuntimeConfig = {
+  inputs: Math.max(1, Object.keys(defaultInputs).length),
+  pgm_count: 1,
+  aux_count: 4,
 };
 
 const processes = new Map<OutputKey, ProcessState>();
@@ -248,7 +257,7 @@ async function parseEd25519PublicKey(raw: string): Promise<KeyLike> {
 }
 
 function inputUri(source: string): string {
-  if (inputs[source]) return inputs[source];
+  if (activeInputs[source]) return activeInputs[source];
   if (source.startsWith("srt://")) return source;
   throw new Error(`unsupported source: ${source}`);
 }
@@ -304,12 +313,102 @@ function startOutput(key: OutputKey, source: string): void {
   processes.set(key, { key, source, uri: nextOutputUri, proc });
 }
 
+function stopOutput(key: OutputKey): void {
+  const current = processes.get(key);
+  if (!current) return;
+  current.proc.kill("SIGTERM");
+  processes.delete(key);
+}
+
 function applyRouting(): void {
+  if (!state.program) {
+    stopOutput("pgm");
+    stopOutput("aux1");
+    stopOutput("aux2");
+    stopOutput("aux3");
+    stopOutput("aux4");
+    return;
+  }
   startOutput("pgm", state.program);
-  startOutput("aux1", state.aux["1"]);
-  startOutput("aux2", state.aux["2"]);
-  startOutput("aux3", state.aux["3"]);
-  startOutput("aux4", state.aux["4"]);
+  if (runtimeConfig.aux_count >= 1) startOutput("aux1", state.aux["1"]); else stopOutput("aux1");
+  if (runtimeConfig.aux_count >= 2) startOutput("aux2", state.aux["2"]); else stopOutput("aux2");
+  if (runtimeConfig.aux_count >= 3) startOutput("aux3", state.aux["3"]); else stopOutput("aux3");
+  if (runtimeConfig.aux_count >= 4) startOutput("aux4", state.aux["4"]); else stopOutput("aux4");
+}
+
+function pickInput(n: number): string {
+  const key = `input${n}`;
+  if (activeInputs[key]) return key;
+  return Object.keys(activeInputs).sort()[0] ?? "";
+}
+
+function bootstrapStateFromInputs(): void {
+  state.program = pickInput(1);
+  state.preview = pickInput(2) || state.program;
+  state.aux["1"] = pickInput(1) || state.program;
+  state.aux["2"] = pickInput(2) || state.program;
+  state.aux["3"] = pickInput(3) || state.program;
+  state.aux["4"] = pickInput(4) || state.program;
+}
+
+function ensureSourceAllowed(source: string, cfg: RuntimeConfig): boolean {
+  if (source.startsWith("srt://")) return true;
+  if (!source.startsWith("input")) return false;
+  const n = Number(source.slice("input".length));
+  return Number.isFinite(n) && n >= 1 && n <= cfg.inputs && Boolean(activeInputs[`input${n}`]);
+}
+
+function applyRuntimeConfig(next: RuntimeConfig): RuntimeConfig {
+  if (!Number.isInteger(next.inputs) || next.inputs < 1 || next.inputs > 8) {
+    throw new Error("inputs must be integer between 1 and 8");
+  }
+  if (!Number.isInteger(next.pgm_count) || next.pgm_count !== 1) {
+    throw new Error("pgm_count currently supports only 1");
+  }
+  if (!Number.isInteger(next.aux_count) || next.aux_count < 0 || next.aux_count > 4) {
+    throw new Error("aux_count must be integer between 0 and 4");
+  }
+  if (next.input_sources && next.input_sources.length > 8) {
+    throw new Error("input_sources cannot exceed 8 entries");
+  }
+
+  const updatedInputs: Record<string, string> = {};
+  const sourceList = next.input_sources && next.input_sources.length > 0
+    ? next.input_sources
+    : Array.from({ length: next.inputs }, (_, idx) => activeInputs[`input${idx + 1}`] || defaultInputs[`input${idx + 1}`] || "");
+
+  for (let i = 0; i < next.inputs; i += 1) {
+      const src = String(sourceList[i] ?? "").trim();
+      if (!src) throw new Error(`input_sources[${i}] is empty`);
+      updatedInputs[`input${i + 1}`] = src;
+  }
+  activeInputs = updatedInputs;
+
+  if (next.aux_sources) {
+    for (const [ch, srcRaw] of Object.entries(next.aux_sources)) {
+      if (!["1", "2", "3", "4"].includes(ch)) throw new Error("aux_sources keys must be 1..4");
+      const src = String(srcRaw ?? "").trim();
+      if (!src) throw new Error(`aux_sources[${ch}] is empty`);
+      if (!ensureSourceAllowed(src, next)) throw new Error(`aux_sources[${ch}] source out of range`);
+      state.aux[ch as "1" | "2" | "3" | "4"] = src;
+    }
+  }
+
+  if (!ensureSourceAllowed(state.program, next)) state.program = pickInput(1);
+  if (!ensureSourceAllowed(state.preview, next)) state.preview = pickInput(2) || state.program;
+  for (const ch of ["1", "2", "3", "4"] as const) {
+    if (!ensureSourceAllowed(state.aux[ch], next)) state.aux[ch] = pickInput(Number(ch)) || state.program;
+  }
+
+  runtimeConfig = {
+    inputs: next.inputs,
+    pgm_count: next.pgm_count,
+    aux_count: next.aux_count,
+    input_sources: next.input_sources?.map((s) => String(s)),
+    aux_sources: next.aux_sources ? { ...next.aux_sources } : undefined,
+  };
+  applyRouting();
+  return runtimeConfig;
 }
 
 async function readBody(req: IncomingMessage): Promise<any> {
@@ -394,6 +493,24 @@ const server = createServer(async (req, res) => {
       writeJson(res, 200, state);
       return;
     }
+    if (req.method === "GET" && req.url === "/api/v1/runtime/config") {
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
+      writeJson(res, 200, { config: runtimeConfig, state });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/v1/runtime/config/apply") {
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
+      const body = (await readBody(req)) as RuntimeConfig;
+      const applied = applyRuntimeConfig({
+        inputs: Number(body.inputs),
+        pgm_count: Number(body.pgm_count),
+        aux_count: Number(body.aux_count),
+        input_sources: body.input_sources,
+        aux_sources: body.aux_sources,
+      });
+      writeJson(res, 200, { applied: true, config: applied, state });
+      return;
+    }
     if (req.method === "POST" && req.url === "/api/v1/switch/program") {
       if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       const body = await readBody(req);
@@ -438,7 +555,13 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
-applyRouting();
+bootstrapStateFromInputs();
+if (Object.keys(activeInputs).length > 0) {
+  applyRouting();
+} else {
+  runtimeConfig.aux_count = 0;
+  console.log("[engine] no input URIs configured at boot; waiting runtime config apply");
+}
 server.listen(controlPort, controlHost, () => {
   console.log(`[engine] Eyevinn TS control API on ${controlHost}:${controlPort}`);
 });

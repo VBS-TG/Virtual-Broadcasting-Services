@@ -33,6 +33,7 @@ type Config struct {
 	ConsoleJWTPublicKeys []string
 	GuestTokenTTL        time.Duration
 	GuestDBPath          string
+	RuntimeDBPath        string
 
 	RouteControlBaseURL  string
 	PGMDefaultLatencyMs  int
@@ -107,6 +108,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("VBS_GUEST_TOKEN_TTL_SEC must be >= 60")
 	}
 	guestDBPath := strings.TrimSpace(getenvDefault("VBS_GUEST_DB_PATH", "data/console-guests.db"))
+	runtimeDBPath := strings.TrimSpace(getenvDefault("VBS_RUNTIME_DB_PATH", "data/console-runtime.db"))
+	if runtimeDBPath == "" {
+		return nil, fmt.Errorf("VBS_RUNTIME_DB_PATH is required")
+	}
 
 	return &Config{
 		ListenAddr:         listen,
@@ -124,6 +129,7 @@ func Load() (*Config, error) {
 		ConsoleJWTPublicKeys: consolePub,
 		GuestTokenTTL:      time.Duration(guestTTL) * time.Second,
 		GuestDBPath:        guestDBPath,
+		RuntimeDBPath:      runtimeDBPath,
 		RouteControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_BASE_URL")),
 		PGMDefaultLatencyMs: getenvIntDefault("VBS_PGM_DEFAULT_LATENCY_MS", 200),
 		EngineControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ENGINE_CONTROL_BASE_URL")),

@@ -1,7 +1,6 @@
 package consoleauth
 
 import (
-	"context"
 	"bytes"
 	"crypto/ed25519"
 	"crypto/ecdsa"
@@ -81,14 +80,6 @@ func NewProvider(cfg config.Config) *Provider {
 		consolePubKeys: pubs,
 		keys: map[string]any{},
 	}
-}
-
-func (p *Provider) BearerToken(ctx context.Context) (string, error) {
-	_ = ctx
-	if p.cfg.CFAccessJWT == "" {
-		return "", fmt.Errorf("VBS_CF_ACCESS_JWT is required")
-	}
-	return p.cfg.CFAccessJWT, nil
 }
 
 func (p *Provider) ApplyAccessHeaders(header http.Header) error {

@@ -11,7 +11,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +36,11 @@ type Server struct {
 	eventMu    sync.Mutex
 	eventConns map[*websocket.Conn]struct{}
 	guestStore *guestStore
+	runtimeStore *runtimeStore
+
+	runtimeMu        sync.RWMutex
+	runtimeCfg       runtimeConfig
+	runtimeUpdatedAt int64
 }
 
 type guestSession struct {
@@ -47,6 +51,14 @@ type guestSession struct {
 	Revoked        bool   `json:"revoked"`
 	CreatedAt      int64  `json:"created_at"`
 	ExpiresAt      int64  `json:"expires_at"`
+}
+
+type runtimeConfig struct {
+	Inputs      int               `json:"inputs"`
+	PGMCount    int               `json:"pgm_count"`
+	AUXCount    int               `json:"aux_count"`
+	InputSources []string         `json:"input_sources,omitempty"`
+	AUXSources  map[string]string `json:"aux_sources,omitempty"`
 }
 
 // New constructs a Server from config.
@@ -63,12 +75,29 @@ func New(cfg *config.Config) *Server {
 				return true
 			},
 		},
+		runtimeCfg: runtimeConfig{
+			Inputs:   8,
+			PGMCount: 1,
+			AUXCount: 4,
+		},
+		runtimeUpdatedAt: time.Now().UTC().Unix(),
 	}
 	store, err := openGuestStore(cfg.GuestDBPath)
 	if err != nil {
 		log.Fatalf("guest store init failed: %v", err)
 	}
 	s.guestStore = store
+	rtStore, err := openRuntimeStore(cfg.RuntimeDBPath)
+	if err != nil {
+		log.Fatalf("runtime store init failed: %v", err)
+	}
+	s.runtimeStore = rtStore
+	if savedCfg, savedAt, err := s.runtimeStore.Load(); err == nil {
+		if err := validateRuntimeConfig(savedCfg); err == nil {
+			s.runtimeCfg = savedCfg
+			s.runtimeUpdatedAt = savedAt
+		}
+	}
 	access, err := auth.NewAccessJWTVerifier(
 		cfg.CFAccessMode,
 		cfg.CFAccessTeamDomain,
@@ -101,8 +130,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vbs/telemetry/events/ws", s.handleTelemetryEventsWS)
 	s.mux.HandleFunc("GET /api/v1/telemetry/latest", s.handleTelemetryLatest)
 	s.mux.HandleFunc("POST /api/v1/stream/session-key", s.handleSessionKey)
-	s.mux.HandleFunc("POST /api/v1/pgm/session", s.handlePGMSession)
-	s.mux.HandleFunc("POST /api/v1/aux/session", s.handleAUXSession)
 	s.mux.HandleFunc("POST /api/v1/pgm/route-buffer", s.handlePGMRouteBuffer)
 	s.mux.HandleFunc("GET /api/v1/route/metrics", s.handleRouteMetrics)
 	s.mux.HandleFunc("POST /api/v1/switch/program", s.handleSwitchProgram)
@@ -113,6 +140,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/v1/guest/sessions/{id}", s.handleGuestSessionDelete)
 	s.mux.HandleFunc("POST /api/v1/guest/exchange-pin", s.handleGuestExchangePIN)
 	s.mux.HandleFunc("POST /api/v1/guest/introspect", s.handleGuestIntrospect)
+	s.mux.HandleFunc("GET /api/v1/runtime/config", s.handleRuntimeConfigGet)
+	s.mux.HandleFunc("PUT /api/v1/runtime/config", s.handleRuntimeConfigPut)
+	s.mux.HandleFunc("POST /api/v1/runtime/config/apply", s.handleRuntimeConfigApply)
 }
 
 // ListenAndServe starts the HTTP server.
@@ -127,6 +157,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.closeEventConns()
 	if s.guestStore != nil {
 		_ = s.guestStore.Close()
+	}
+	if s.runtimeStore != nil {
+		_ = s.runtimeStore.Close()
 	}
 	return s.http.Shutdown(ctx)
 }
@@ -313,107 +346,6 @@ func trimErr(err error) string {
 		s = s[:200]
 	}
 	return s
-}
-
-type pgmSessionResponse struct {
-	StreamUUID      string `json:"stream_uuid"`
-	PublishStreamID string `json:"publish_streamid"`
-	ReadStreamID    string `json:"read_streamid"`
-	PlaybackSRTURL  string `json:"playback_srt_url"`
-	RelayHost       string `json:"relay_host,omitempty"`
-}
-
-type auxSessionItem struct {
-	Channel int `json:"channel"`
-	pgmSessionResponse
-}
-
-type auxSessionResponse struct {
-	AuxCount int              `json:"aux_count"`
-	Sessions []auxSessionItem `json:"sessions"`
-}
-
-func (s *Server) handlePGMSession(w http.ResponseWriter, r *http.Request) {
-	if !s.controlAuthorized(r) {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-	if s.cfg.RouteControlBaseURL == "" {
-		http.Error(w, `{"error":"VBS_ROUTE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
-		return
-	}
-	respBody, status, err := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/pgm/session", []byte(`{}`))
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"route pgm session proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
-		return
-	}
-	if status >= 400 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = w.Write(respBody)
-		return
-	}
-	var out pgmSessionResponse
-	if err := json.Unmarshal(respBody, &out); err != nil {
-		http.Error(w, `{"error":"invalid route session payload"}`, http.StatusBadGateway)
-		return
-	}
-	if out.PlaybackSRTURL != "" && s.cfg.PGMDefaultLatencyMs > 0 {
-		if u, err := url.Parse(out.PlaybackSRTURL); err == nil {
-			q := u.Query()
-			if strings.TrimSpace(q.Get("latency")) == "" {
-				q.Set("latency", fmt.Sprintf("%d", s.cfg.PGMDefaultLatencyMs))
-				u.RawQuery = q.Encode()
-				out.PlaybackSRTURL = u.String()
-			}
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
-}
-
-func (s *Server) handleAUXSession(w http.ResponseWriter, r *http.Request) {
-	if !s.controlAuthorized(r) {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-	if s.cfg.RouteControlBaseURL == "" {
-		http.Error(w, `{"error":"VBS_ROUTE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
-		return
-	}
-	respBody, status, err := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/aux/session", []byte(`{}`))
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"route aux session proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
-		return
-	}
-	if status >= 400 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = w.Write(respBody)
-		return
-	}
-	var out auxSessionResponse
-	if err := json.Unmarshal(respBody, &out); err != nil {
-		http.Error(w, `{"error":"invalid route aux payload"}`, http.StatusBadGateway)
-		return
-	}
-	if s.cfg.PGMDefaultLatencyMs > 0 {
-		for i := range out.Sessions {
-			if out.Sessions[i].PlaybackSRTURL == "" {
-				continue
-			}
-			if u, err := url.Parse(out.Sessions[i].PlaybackSRTURL); err == nil {
-				q := u.Query()
-				if strings.TrimSpace(q.Get("latency")) == "" {
-					q.Set("latency", fmt.Sprintf("%d", s.cfg.PGMDefaultLatencyMs))
-					u.RawQuery = q.Encode()
-					out.Sessions[i].PlaybackSRTURL = u.String()
-				}
-			}
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
 }
 
 func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
@@ -708,6 +640,249 @@ func (s *Server) handleGuestIntrospect(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"active": ok,
 	})
+}
+
+func (s *Server) handleRuntimeConfigGet(w http.ResponseWriter, r *http.Request) {
+	if !s.controlAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	cfg, updatedAt := s.getRuntimeConfig()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"config":     cfg,
+		"updated_at": updatedAt,
+	})
+}
+
+func (s *Server) handleRuntimeConfigPut(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var body runtimeConfig
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxTokenBodyBytes)).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+	if err := validateRuntimeConfig(body); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, trimErr(err)), http.StatusBadRequest)
+		return
+	}
+	s.setRuntimeConfig(body)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"saved": true,
+		"config": body,
+		"updated_at": s.runtimeUpdatedAt,
+	})
+}
+
+func (s *Server) handleRuntimeConfigApply(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	cfg, updatedAt := s.getRuntimeConfig()
+	cfgBody, _ := json.Marshal(cfg)
+	result := map[string]any{
+		"config":      cfg,
+		"updated_at":  updatedAt,
+		"route":       map[string]any{"ok": false},
+		"engine":      map[string]any{"ok": false},
+		"applied_at":  time.Now().UTC().Unix(),
+	}
+
+	var prevRoute json.RawMessage
+	var prevEngine json.RawMessage
+	if s.cfg.RouteControlBaseURL != "" {
+		if raw, status, err := s.routeControlGET(incomingAuthHeader(r), "/api/v1/route/runtime/config"); err == nil && status < 400 {
+			prevRoute = extractConfigPayload(raw)
+		}
+	}
+	if s.cfg.EngineControlBaseURL != "" {
+		if raw, status, err := s.engineControlGET(incomingAuthHeader(r), "/api/v1/runtime/config"); err == nil && status < 400 {
+			prevEngine = extractConfigPayload(raw)
+		}
+	}
+
+	routeApplied := false
+	if s.cfg.RouteControlBaseURL != "" {
+		applyBody, applyStatus, applyErr := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/runtime/config/apply", cfgBody)
+		routeApplied = applyErr == nil && applyStatus < 400
+		result["route"] = map[string]any{
+			"ok":         routeApplied,
+			"apply_status": applyStatus,
+			"apply_raw":  string(applyBody),
+			"error":      firstErr(applyErr),
+		}
+	}
+
+	engineApplied := false
+	if s.cfg.EngineControlBaseURL != "" {
+		applyBody, applyStatus, applyErr := s.engineControlPOST(incomingAuthHeader(r), "/api/v1/runtime/config/apply", cfgBody)
+		engineApplied = applyErr == nil && applyStatus < 400
+		stateRaw, stateStatus, stateErr := s.engineControlGET(incomingAuthHeader(r), "/api/v1/switch/state")
+		result["engine"] = map[string]any{
+			"ok":           engineApplied && stateErr == nil && stateStatus < 400,
+			"apply_status": applyStatus,
+			"apply_raw":    string(applyBody),
+			"state_status": stateStatus,
+			"state":        json.RawMessage(stateRaw),
+			"error":        firstErr(applyErr, stateErr),
+		}
+	}
+
+	if !routeApplied || !engineApplied {
+		rolled := map[string]bool{}
+		if routeApplied && len(prevRoute) > 0 {
+			_, status, err := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/runtime/config/apply", prevRoute)
+			rolled["route"] = err == nil && status < 400
+		}
+		if engineApplied && len(prevEngine) > 0 {
+			_, status, err := s.engineControlPOST(incomingAuthHeader(r), "/api/v1/runtime/config/apply", prevEngine)
+			rolled["engine"] = err == nil && status < 400
+		}
+		result["rolled_back"] = rolled
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func validateRuntimeConfig(cfg runtimeConfig) error {
+	if cfg.Inputs < 1 || cfg.Inputs > 8 {
+		return fmt.Errorf("inputs must be between 1 and 8")
+	}
+	if cfg.PGMCount < 1 || cfg.PGMCount > 1 {
+		return fmt.Errorf("pgm_count currently supports only 1")
+	}
+	if cfg.AUXCount < 0 || cfg.AUXCount > 4 {
+		return fmt.Errorf("aux_count must be between 0 and 4")
+	}
+	if len(cfg.InputSources) > 8 {
+		return fmt.Errorf("input_sources cannot exceed 8 entries")
+	}
+	for i, src := range cfg.InputSources {
+		if strings.TrimSpace(src) == "" {
+			return fmt.Errorf("input_sources[%d] is empty", i)
+		}
+	}
+	for k, v := range cfg.AUXSources {
+		if k != "1" && k != "2" && k != "3" && k != "4" {
+			return fmt.Errorf("aux_sources keys must be 1..4")
+		}
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("aux_sources[%s] is empty", k)
+		}
+	}
+	return nil
+}
+
+func (s *Server) setRuntimeConfig(cfg runtimeConfig) {
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	s.runtimeCfg = cfg
+	s.runtimeUpdatedAt = time.Now().UTC().Unix()
+	if s.runtimeStore != nil {
+		_ = s.runtimeStore.Save(s.runtimeCfg, s.runtimeUpdatedAt)
+	}
+}
+
+func (s *Server) getRuntimeConfig() (runtimeConfig, int64) {
+	s.runtimeMu.RLock()
+	defer s.runtimeMu.RUnlock()
+	return s.runtimeCfg, s.runtimeUpdatedAt
+}
+
+func firstErr(errs ...error) string {
+	for _, err := range errs {
+		if err != nil {
+			return err.Error()
+		}
+	}
+	return ""
+}
+
+func extractConfigPayload(raw []byte) json.RawMessage {
+	var wrapped struct {
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil && len(wrapped.Config) > 0 {
+		return wrapped.Config
+	}
+	return json.RawMessage(raw)
+}
+
+func (s *Server) routeControlGET(authorization, path string) ([]byte, int, error) {
+	base := strings.TrimRight(s.cfg.RouteControlBaseURL, "/")
+	target := base + path
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	if auth := strings.TrimSpace(authorization); auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return raw, resp.StatusCode, nil
+}
+
+func (s *Server) engineControlGET(authorization, path string) ([]byte, int, error) {
+	base := strings.TrimRight(s.cfg.EngineControlBaseURL, "/")
+	target := base + path
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if auth := strings.TrimSpace(authorization); auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return raw, resp.StatusCode, nil
+}
+
+func (s *Server) engineControlPOST(authorization, path string, body []byte) ([]byte, int, error) {
+	base := strings.TrimRight(s.cfg.EngineControlBaseURL, "/")
+	target := base + path
+	req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if auth := strings.TrimSpace(authorization); auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return raw, resp.StatusCode, nil
 }
 
 func randomToken(n int) string {

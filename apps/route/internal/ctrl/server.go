@@ -73,6 +73,9 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 	}
 
 	routeStore := newRelayRouteStore()
+	runtimeMu := sync.RWMutex{}
+	auxCount := 4
+	pgmCount := 1
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -161,19 +164,89 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 			Channel int `json:"channel"`
 			relaySession
 		}
-		items := make([]auxItem, 0, 4)
-		for i := 1; i <= 4; i++ {
+		runtimeMu.RLock()
+		currentAuxCount := auxCount
+		runtimeMu.RUnlock()
+		items := make([]auxItem, 0, currentAuxCount)
+		for i := 1; i <= currentAuxCount; i++ {
 			items = append(items, auxItem{
 				Channel:      i,
 				relaySession: buildRelaySession(cfg, r.Host),
 			})
 		}
 		resp := map[string]any{
-			"aux_count": 4,
+			"aux_count": currentAuxCount,
 			"sessions":  items,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	mux.HandleFunc("/api/v1/route/runtime/config", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizedControlPlane(r, cfg, auth) {
+			logger.Printf("[route][ctrl] 未授權的 API 請求 remote=%s path=%s", r.RemoteAddr, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		runtimeMu.RLock()
+		resp := map[string]any{
+			"inputs":    8,
+			"pgm_count": pgmCount,
+			"aux_count": auxCount,
+		}
+		runtimeMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"config": resp})
+	})
+
+	mux.HandleFunc("/api/v1/route/runtime/config/apply", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizedControlPlane(r, cfg, auth) {
+			logger.Printf("[route][ctrl] 未授權的 API 請求 remote=%s path=%s", r.RemoteAddr, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Inputs   int `json:"inputs"`
+			PGMCount int `json:"pgm_count"`
+			AUXCount int `json:"aux_count"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if body.Inputs < 1 || body.Inputs > 8 {
+			http.Error(w, "inputs must be 1..8", http.StatusBadRequest)
+			return
+		}
+		if body.PGMCount != 1 {
+			http.Error(w, "pgm_count currently supports only 1", http.StatusBadRequest)
+			return
+		}
+		if body.AUXCount < 0 || body.AUXCount > 4 {
+			http.Error(w, "aux_count must be 0..4", http.StatusBadRequest)
+			return
+		}
+		runtimeMu.Lock()
+		pgmCount = body.PGMCount
+		auxCount = body.AUXCount
+		runtimeMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"applied": true,
+			"config": map[string]any{
+				"inputs":    body.Inputs,
+				"pgm_count": body.PGMCount,
+				"aux_count": body.AUXCount,
+			},
+		})
 	})
 
 	mux.HandleFunc("/api/v1/route/routes", func(w http.ResponseWriter, r *http.Request) {

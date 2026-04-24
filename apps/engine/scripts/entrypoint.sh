@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for i in 1 2 3 4 5 6 7 8; do
-  key="VBS_ENGINE_SRT_INPUT_${i}_URI"
-  if [[ -z "${!key:-}" ]]; then
-    echo "錯誤: 需設定 ${key}" >&2
-    exit 1
-  fi
-done
-
 if [[ -z "${VBS_SRT_PASSPHRASE:-}" ]]; then
   echo "錯誤: 需設定 VBS_SRT_PASSPHRASE（AES-256）" >&2
   exit 1

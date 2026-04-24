@@ -8,7 +8,8 @@
 | :--- | :--- | :--- |
 | `VBS_SRT_PASSPHRASE` | 是 | 全系統 SRT AES-256 密鑰，長度 10–64 字元。 |
 | `VBS_CONSOLE_BASE_URL` | 是 | Console 控制平面 HTTPS **原點**（例 `https://api.example.com`，建議不含路徑前綴）；若 Hub 在子路徑，請改以 `VBS_ROUTE_TELEMETRY_WS_PATH` 指定完整路徑。 |
-| `VBS_CF_ACCESS_JWT` | 是 | Route 對 Console telemetry 與控制面請求使用的 Cloudflare Access JWT（Bearer）。 |
+| `VBS_CF_ACCESS_JWT` | 條件必填 | Route 對 Console telemetry 與控制面請求使用的 Cloudflare Access JWT（Bearer）；未提供時需改用 Service Token。 |
+| `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET` | 條件必填 | Route 對 Console telemetry 與控制面請求可用的 Cloudflare Service Token；未提供時需改用 `VBS_CF_ACCESS_JWT`。 |
 | `VBS_CF_ACCESS_AUD` | 是 | Cloudflare Access JWT audience（Route 驗簽控制面請求用）。 |
 | `VBS_CF_ACCESS_TEAM_DOMAIN` | 條件必填 | Cloudflare team domain（若未提供 `VBS_CF_ACCESS_JWKS_URL` 則必填）。 |
 | `VBS_CF_ACCESS_JWKS_URL` | 條件必填 | Cloudflare JWKS URL（若未提供 `VBS_CF_ACCESS_TEAM_DOMAIN` 則必填）。 |
@@ -27,7 +28,7 @@
 | 規範項目 | 狀態 |
 | :--- | :--- |
 | 公網 SRT、Passphrase 環境注入、長度 10–64 | 已實作 |
-| 遙測 1Hz、單筆 JSON ≤255 bytes、WSS 上報（Bearer JWT） | 已實作（上報為非阻塞 goroutine） |
+| 遙測 1Hz、單筆 JSON ≤255 bytes、WSS 上報（JWT 或 Service Token） | 已實作（上報為非阻塞 goroutine） |
 | ingest 停滯自癒（曾有流量後連續歸零達閾值秒數） | 已實作，可關閉 |
 | `sysctl` rmem/wmem ≥16MB、可選 MTU | 已實作 |
 | 控制面 HTTP：`/healthz`、`/api/v1/route/buffer`（需 Bearer） | 已實作 |
@@ -51,7 +52,7 @@
 | Route-SRTLA-Ingest / 20020 | UDP/SRTLA | Listener | —（媒體層 passphrase） | Capture → Route |
 | Route-SRT-Internal / 20021 | UDP/SRT | 本機 127.0.0.1 | — | Route 內部 |
 | Route-SRT-Out / 20030 | UDP/SRT | `srt://<DNS 或域名>:20030` Listener | —（媒體層 passphrase） | Route → Engine |
-| Route-Telemetry | WSS | 由 `VBS_CONSOLE_BASE_URL` + `VBS_ROUTE_TELEMETRY_WS_PATH` 衍生之 `wss://…` | `Authorization: Bearer <Cloudflare Access JWT>` | Route → Console Hub |
+| Route-Telemetry | WSS | 由 `VBS_CONSOLE_BASE_URL` + `VBS_ROUTE_TELEMETRY_WS_PATH` 衍生之 `wss://…` | `Authorization: Bearer <Cloudflare Access JWT>` **或** `Cf-Access-Client-Id/Secret` | Route → Console Hub |
 | Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | `/healthz` 無；其餘 `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發；需通過本地映射為 admin/operator） | Console / 維運 → Route |
 
 ### Route-Telemetry Payload
@@ -80,25 +81,30 @@
 
 可僅送需要變更的欄位；成功後 Route 會重啟媒體管線以套用新參數。
 
+### Route Runtime Config API
+
+- `GET /api/v1/route/runtime/config`：回傳 Route 當前 runtime 配置（目前含 `inputs`、`pgm_count`、`aux_count`）。
+- `POST /api/v1/route/runtime/config/apply`：套用 runtime 配置（`inputs:1..8`、`pgm_count:1`、`aux_count:0..4`）。
+
 ---
 
 ## VBS-Engine（`apps/engine`）
 
-基於 **Eyevinn 風格 TypeScript/Node 媒體核心**：**2 路 SRT（`uri` 入）**、切換盤 API（Program/Preview/AUX）、**PGM + 4 路 AUX** 以 SRT Caller 輸出至 Route。  
-**WSS 遙測**：已實作（1Hz，Bearer JWT，單筆 ≤255 bytes），直接使用 Cloudflare Access JWT。
+基於 **Eyevinn 風格 TypeScript/Node 媒體核心**：**最多 8 路 SRT（`uri` 入）**、切換盤 API（Program/Preview/AUX）、**PGM + 4 路 AUX** 以 SRT Caller 輸出至 Route。  
+**WSS 遙測**：已實作（1Hz，單筆 ≤255 bytes），可使用 Cloudflare Access JWT 或 Service Token。
 
 ### 環境變數（Engine 容器）
 
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
-| `VBS_ENGINE_SRT_INPUT_1_URI` | 是 | 第一路 SRT Caller URI（例 `srt://route.example.com:20030?mode=caller&latency=2000&passphrase=...&pbkeylen=32`） |
-| `VBS_ENGINE_SRT_INPUT_2_URI` | 是 | 第二路（測試可與第一路相同 URI 複製畫面） |
-| `VBS_ENGINE_PGM_SRT_URI` | 是 | PGM 輸出之 SRT Caller 完整 URI（ffmpeg 以 mpegts 送出） |
+| `VBS_ENGINE_SRT_INPUT_1_URI` ~ `VBS_ENGINE_SRT_INPUT_8_URI` | 否 | 啟動預設輸入 URI；可不設定，改由 `POST /api/v1/runtime/config/apply` 動態下發。 |
+| `VBS_ENGINE_PGM_SRT_URI` | 否 | PGM 輸出之 SRT Caller 完整 URI；未填可由 Relay host/port + streamid 自動組合。 |
 | `VBS_ENGINE_AUX1_SRT_URI` ~ `VBS_ENGINE_AUX4_SRT_URI` | 否 | AUX 輸出之 SRT Caller URI；未填可由 Relay host/port + streamid 自動組合。 |
 | `VBS_ENGINE_MIXER_WIDTH` | 否 | 預設 `854`（約 480p 16:9 寬） |
 | `VBS_ENGINE_MIXER_HEIGHT` | 否 | 預設 `480` |
 | `VBS_ENGINE_CONTROL_BIND_HOST` / `VBS_ENGINE_CONTROL_BIND_PORT` | 否 | Engine 切換盤 API 監聽位址，預設 `0.0.0.0:5010`。 |
-| `VBS_CF_ACCESS_JWT` | 是 | Engine telemetry 上報與控制 API 驗證使用的 Cloudflare Access JWT（Bearer）。 |
+| `VBS_CF_ACCESS_JWT` | 條件必填 | Engine telemetry 與 Console guest introspect 請求可用的 Cloudflare Access JWT（Bearer）；未提供時需改用 Service Token。 |
+| `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET` | 條件必填 | Engine telemetry 與 Console guest introspect 可用的 Cloudflare Service Token；未提供時需改用 `VBS_CF_ACCESS_JWT`。 |
 | `VBS_CF_ACCESS_AUD` | 是 | Cloudflare Access JWT audience（Single AUD，Engine 控制 API 驗簽用）。 |
 | `VBS_CF_ACCESS_TEAM_DOMAIN` | 條件必填 | Cloudflare team domain（若未提供 `VBS_CF_ACCESS_JWKS_URL` 則必填）。 |
 | `VBS_CF_ACCESS_JWKS_URL` | 條件必填 | Cloudflare JWKS URL（若未提供 `VBS_CF_ACCESS_TEAM_DOMAIN` 則必填）。 |
@@ -124,10 +130,12 @@
 
 ### 控制 API（Engine）
 
-- `POST /api/v1/switch/program`：切 Program 來源（body：`{"source":"input1|input2|srt://..."}`）。
+- `POST /api/v1/switch/program`：切 Program 來源（body：`{"source":"input1..input8|srt://..."}`）。
 - `POST /api/v1/switch/preview`：切 Preview 來源（body：同上）。
-- `POST /api/v1/switch/aux`：切 AUX 路由（body：`{"channel":"1..4","source":"input1|input2|srt://..."}`）。
+- `POST /api/v1/switch/aux`：切 AUX 路由（body：`{"channel":"1..4","source":"input1..input8|srt://..."}`）。
 - `GET /api/v1/switch/state`：查目前 Program/Preview/AUX 狀態。
+- `GET /api/v1/runtime/config`：查 Engine 當前 Runtime 配置（inputs/pgm_count/aux_count）。
+- `POST /api/v1/runtime/config/apply`：套用 Runtime 配置（body 範例：`{"inputs":8,"pgm_count":1,"aux_count":4,"input_sources":[...],"aux_sources":{"1":"input1"}}`）。
 
 ### 部署
 
@@ -141,7 +149,7 @@
 
 ## VBS-Console（`apps/console`，MVP-A）
 
-Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest** 與 **節點最新狀態內存快照** 的最小服務；預設 HTTP `:4000`，本倉庫 `docker-compose.console.yml` 將主機埠映射為 **5000**（避免與本機 4000 衝突）；對外可經 Cloudflare Tunnel（見 `docs/deploy/cloudflared-api.example.yml`）。
+Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 配置編排中心（Orchestrator）** 與 **節點最新狀態內存快照** 的最小服務；預設 HTTP `:4000`，本倉庫 `docker-compose.console.yml` 將主機埠映射為 **5000**（避免與本機 4000 衝突）；對外可經 Cloudflare Tunnel（見 `docs/deploy/cloudflared-api.example.yml`）。
 
 ### 環境變數（Console 行程）
 
@@ -162,6 +170,8 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest** 與 **節點
 | `VBS_CONSOLE_TELEMETRY_MAX_BYTES` | 否 | 單筆 WS 訊息上限，預設 `255`（與 1Hz／≤255B 規範一致）。 |
 | `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC` | 否 | 節點離線判定秒數，預設 `10`（最小 `3`）。 |
 
+> 配置邊界：`.env` 僅承載固定基礎參數（安全、定位、資源上限）；當天活動配置（IN 路數、PGM/AUX 路數、來源綁定）應由 Console Runtime API 下發與熱更新，不應依賴改 `.env` 重啟。
+
 ### 服務表（Console）
 
 | Service / Port | Protocol | Endpoint | Auth Mode | Node Context |
@@ -171,6 +181,9 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest** 與 **節點
 | Console-Telemetry-Events | WS/WSS | `GET /vbs/telemetry/events/ws`（Upgrade） | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/operator | Console → UI（online/offline 狀態事件） |
 | Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/operator | 讀取每節點最近一次遙測（內存 + presence） |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/stream/session-key` | `Authorization: Bearer <Cloudflare Access JWT>`；需映射為 admin | 生成當次直播 SRT AES-256 passphrase |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin/operator） | 讀取今日 Runtime 配置 |
+| Console-HTTP / 4000 | HTTP | `PUT /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin） | 儲存今日 Runtime 配置 |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/runtime/config/apply` | `Authorization: Bearer <JWT>`（admin） | 以 staged apply 下發至 Route/Engine（失敗回退） |
 
 ### JWT（ZTA）
 
