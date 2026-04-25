@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 env/
+apps/console_frontend/node_modules/
