@@ -1,24 +1,12 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
-import { spawn, ChildProcessByStdio } from "node:child_process";
-import { Readable } from "node:stream";
 import { URL } from "node:url";
 import { createRemoteJWKSet, importSPKI, jwtVerify, type KeyLike, type JWTPayload } from "jose";
 import WebSocket from "ws";
-
-type OutputKey = "pgm" | "aux1" | "aux2" | "aux3" | "aux4";
 
 interface RuntimeState {
   program: string;
   preview: string;
   aux: Record<"1" | "2" | "3" | "4", string>;
-}
-
-interface ProcessState {
-  key: OutputKey;
-  source: string;
-  uri: string;
-  proc: ChildProcessByStdio<null, Readable, Readable>;
 }
 
 interface RuntimeConfig {
@@ -30,20 +18,12 @@ interface RuntimeConfig {
 }
 
 const controlHost = env("VBS_ENGINE_CONTROL_BIND_HOST", "0.0.0.0");
-const controlPort = intEnv("VBS_ENGINE_CONTROL_BIND_PORT", 5010);
-
-const defaultInputs: Record<string, string> = {};
-for (let i = 1; i <= 8; i += 1) {
-  const uri = env(`VBS_ENGINE_SRT_INPUT_${i}_URI`, "");
-  if (uri) defaultInputs[`input${i}`] = uri;
-}
-let activeInputs: Record<string, string> = { ...defaultInputs };
-
-const relayHost = env("VBS_ROUTE_PGM_RELAY_HOST", "");
-const relayPort = intEnv("VBS_ROUTE_PGM_RELAY_PORT", 20030);
-const relayPublicHost = env("VBS_ROUTE_PGM_PUBLIC_HOST", relayHost || "route.example.com");
-const passphrase = requiredEnv("VBS_SRT_PASSPHRASE");
-const latency = intEnv("VBS_ENGINE_PGM_SRT_LATENCY_MS", 200);
+const controlPort = intEnv("VBS_ENGINE_CONTROL_BIND_PORT", 5000);
+const openLiveBaseURL = requiredEnv("VBS_EYEVINN_OPENLIVE_BASE_URL");
+const openLiveApplyPath = env("VBS_EYEVINN_OPENLIVE_APPLY_PATH", "/api/v1/runtime/config/apply");
+const openLiveStatePath = env("VBS_EYEVINN_OPENLIVE_STATE_PATH", "/api/v1/switch/state");
+const openLiveHealthPath = env("VBS_EYEVINN_OPENLIVE_HEALTH_PATH", "/healthz");
+const openLiveAuthToken = env("VBS_EYEVINN_OPENLIVE_AUTH_TOKEN", "");
 
 const consoleBase = env("VBS_CONSOLE_BASE_URL", "");
 const telemetryEnabled = env("VBS_ENGINE_TELEMETRY_ENABLED", "1") !== "0" && consoleBase !== "";
@@ -80,44 +60,9 @@ const state: RuntimeState = {
   },
 };
 let runtimeConfig: RuntimeConfig = {
-  inputs: Math.max(1, Object.keys(defaultInputs).length),
+  inputs: 8,
   pgm_count: 1,
   aux_count: 4,
-};
-
-const processes = new Map<OutputKey, ProcessState>();
-
-const outputConfig: Record<OutputKey, { streamEnv: string; streamIdPubEnv: string; streamIdReadEnv: string; uuidEnv: string }> = {
-  pgm: {
-    streamEnv: "VBS_ENGINE_PGM_SRT_URI",
-    streamIdPubEnv: "VBS_ENGINE_PGM_STREAMID_PUBLISH",
-    streamIdReadEnv: "VBS_ENGINE_PGM_STREAMID_READ",
-    uuidEnv: "VBS_PGM_STREAM_UUID",
-  },
-  aux1: {
-    streamEnv: "VBS_ENGINE_AUX1_SRT_URI",
-    streamIdPubEnv: "VBS_ENGINE_AUX1_STREAMID_PUBLISH",
-    streamIdReadEnv: "VBS_ENGINE_AUX1_STREAMID_READ",
-    uuidEnv: "VBS_AUX1_STREAM_UUID",
-  },
-  aux2: {
-    streamEnv: "VBS_ENGINE_AUX2_SRT_URI",
-    streamIdPubEnv: "VBS_ENGINE_AUX2_STREAMID_PUBLISH",
-    streamIdReadEnv: "VBS_ENGINE_AUX2_STREAMID_READ",
-    uuidEnv: "VBS_AUX2_STREAM_UUID",
-  },
-  aux3: {
-    streamEnv: "VBS_ENGINE_AUX3_SRT_URI",
-    streamIdPubEnv: "VBS_ENGINE_AUX3_STREAMID_PUBLISH",
-    streamIdReadEnv: "VBS_ENGINE_AUX3_STREAMID_READ",
-    uuidEnv: "VBS_AUX3_STREAM_UUID",
-  },
-  aux4: {
-    streamEnv: "VBS_ENGINE_AUX4_SRT_URI",
-    streamIdPubEnv: "VBS_ENGINE_AUX4_STREAMID_PUBLISH",
-    streamIdReadEnv: "VBS_ENGINE_AUX4_STREAMID_READ",
-    uuidEnv: "VBS_AUX4_STREAM_UUID",
-  },
 };
 
 function env(name: string, defaultValue: string): string {
@@ -137,6 +82,12 @@ function intEnv(name: string, defaultValue: number): number {
   if (!raw) return defaultValue;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : defaultValue;
+}
+
+function joinURL(base: string, path: string): string {
+  const b = base.replace(/\/+$/, "");
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${b}${p}`;
 }
 
 async function authorized(req: IncomingMessage): Promise<boolean> {
@@ -256,109 +207,23 @@ async function parseEd25519PublicKey(raw: string): Promise<KeyLike> {
   return importSPKI(pem, "EdDSA");
 }
 
-function inputUri(source: string): string {
-  if (activeInputs[source]) return activeInputs[source];
-  if (source.startsWith("srt://")) return source;
-  throw new Error(`unsupported source: ${source}`);
-}
-
-function outputUri(key: OutputKey): string {
-  const explicit = env(outputConfig[key].streamEnv, "");
-  if (explicit) return explicit;
-  if (!relayHost) {
-    throw new Error(`Missing ${outputConfig[key].streamEnv} and VBS_ROUTE_PGM_RELAY_HOST`);
-  }
-  const streamUUID = env(outputConfig[key].uuidEnv, randomUUID());
-  const publish = env(outputConfig[key].streamIdPubEnv, `publish/${streamUUID}`);
-  const read = env(outputConfig[key].streamIdReadEnv, `read/${streamUUID}`);
-  const uri = `srt://${relayHost}:${relayPort}?mode=caller&transtype=live&streamid=${publish}&passphrase=${passphrase}&pbkeylen=32&latency=${latency}`;
-  const readURL = `srt://${relayPublicHost}:${relayPort}?streamid=${read}&passphrase=${passphrase}&latency=${latency}`;
-  console.log(`[engine][output] ${key} publish=${publish} read_url=${readURL}`);
-  return uri;
-}
-
-function startOutput(key: OutputKey, source: string): void {
-  const current = processes.get(key);
-  const nextSourceUri = inputUri(source);
-  const nextOutputUri = outputUri(key);
-
-  if (current && current.source === source && current.uri === nextOutputUri) {
-    return;
-  }
-  if (current) {
-    current.proc.kill("SIGTERM");
-    processes.delete(key);
-  }
-
-  const args = [
-    "-hide_banner",
-    "-loglevel",
-    "warning",
-    "-re",
-    "-i",
-    nextSourceUri,
-    "-c",
-    "copy",
-    "-f",
-    "mpegts",
-    nextOutputUri,
-  ];
-  const proc = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
-  proc.stdout.on("data", (d) => process.stdout.write(`[engine][${key}] ${d}`));
-  proc.stderr.on("data", (d) => process.stderr.write(`[engine][${key}] ${d}`));
-  proc.on("exit", (code) => {
-    console.error(`[engine][${key}] ffmpeg exited code=${code}`);
-    processes.delete(key);
-  });
-  processes.set(key, { key, source, uri: nextOutputUri, proc });
-}
-
-function stopOutput(key: OutputKey): void {
-  const current = processes.get(key);
-  if (!current) return;
-  current.proc.kill("SIGTERM");
-  processes.delete(key);
-}
-
-function applyRouting(): void {
-  if (!state.program) {
-    stopOutput("pgm");
-    stopOutput("aux1");
-    stopOutput("aux2");
-    stopOutput("aux3");
-    stopOutput("aux4");
-    return;
-  }
-  startOutput("pgm", state.program);
-  if (runtimeConfig.aux_count >= 1) startOutput("aux1", state.aux["1"]); else stopOutput("aux1");
-  if (runtimeConfig.aux_count >= 2) startOutput("aux2", state.aux["2"]); else stopOutput("aux2");
-  if (runtimeConfig.aux_count >= 3) startOutput("aux3", state.aux["3"]); else stopOutput("aux3");
-  if (runtimeConfig.aux_count >= 4) startOutput("aux4", state.aux["4"]); else stopOutput("aux4");
-}
-
-function pickInput(n: number): string {
-  const key = `input${n}`;
-  if (activeInputs[key]) return key;
-  return Object.keys(activeInputs).sort()[0] ?? "";
-}
-
-function bootstrapStateFromInputs(): void {
-  state.program = pickInput(1);
-  state.preview = pickInput(2) || state.program;
-  state.aux["1"] = pickInput(1) || state.program;
-  state.aux["2"] = pickInput(2) || state.program;
-  state.aux["3"] = pickInput(3) || state.program;
-  state.aux["4"] = pickInput(4) || state.program;
-}
-
 function ensureSourceAllowed(source: string, cfg: RuntimeConfig): boolean {
+  if (!source) return false;
   if (source.startsWith("srt://")) return true;
   if (!source.startsWith("input")) return false;
   const n = Number(source.slice("input".length));
-  return Number.isFinite(n) && n >= 1 && n <= cfg.inputs && Boolean(activeInputs[`input${n}`]);
+  return Number.isFinite(n) && n >= 1 && n <= cfg.inputs;
 }
 
-function applyRuntimeConfig(next: RuntimeConfig): RuntimeConfig {
+async function fetchOpenLiveState(): Promise<RuntimeState> {
+  const headers: Record<string, string> = {};
+  if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
+  const res = await fetch(joinURL(openLiveBaseURL, openLiveStatePath), { method: "GET", headers });
+  if (!res.ok) throw new Error(`open live state status=${res.status}`);
+  return (await res.json()) as RuntimeState;
+}
+
+async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
   if (!Number.isInteger(next.inputs) || next.inputs < 1 || next.inputs > 8) {
     throw new Error("inputs must be integer between 1 and 8");
   }
@@ -371,18 +236,12 @@ function applyRuntimeConfig(next: RuntimeConfig): RuntimeConfig {
   if (next.input_sources && next.input_sources.length > 8) {
     throw new Error("input_sources cannot exceed 8 entries");
   }
-
-  const updatedInputs: Record<string, string> = {};
-  const sourceList = next.input_sources && next.input_sources.length > 0
-    ? next.input_sources
-    : Array.from({ length: next.inputs }, (_, idx) => activeInputs[`input${idx + 1}`] || defaultInputs[`input${idx + 1}`] || "");
-
-  for (let i = 0; i < next.inputs; i += 1) {
-      const src = String(sourceList[i] ?? "").trim();
-      if (!src) throw new Error(`input_sources[${i}] is empty`);
-      updatedInputs[`input${i + 1}`] = src;
+  const sourceList = next.input_sources ?? [];
+  for (let i = 0; i < sourceList.length; i += 1) {
+    const src = String(sourceList[i] ?? "").trim();
+    if (!src) throw new Error(`input_sources[${i}] is empty`);
+    if (!src.startsWith("srt://")) throw new Error(`input_sources[${i}] must be srt:// URI`);
   }
-  activeInputs = updatedInputs;
 
   if (next.aux_sources) {
     for (const [ch, srcRaw] of Object.entries(next.aux_sources)) {
@@ -390,14 +249,19 @@ function applyRuntimeConfig(next: RuntimeConfig): RuntimeConfig {
       const src = String(srcRaw ?? "").trim();
       if (!src) throw new Error(`aux_sources[${ch}] is empty`);
       if (!ensureSourceAllowed(src, next)) throw new Error(`aux_sources[${ch}] source out of range`);
-      state.aux[ch as "1" | "2" | "3" | "4"] = src;
     }
   }
 
-  if (!ensureSourceAllowed(state.program, next)) state.program = pickInput(1);
-  if (!ensureSourceAllowed(state.preview, next)) state.preview = pickInput(2) || state.program;
-  for (const ch of ["1", "2", "3", "4"] as const) {
-    if (!ensureSourceAllowed(state.aux[ch], next)) state.aux[ch] = pickInput(Number(ch)) || state.program;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
+  const res = await fetch(joinURL(openLiveBaseURL, openLiveApplyPath), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(next),
+  });
+  if (!res.ok) {
+    const raw = await res.text();
+    throw new Error(`open live apply status=${res.status} body=${raw.slice(0, 200)}`);
   }
 
   runtimeConfig = {
@@ -407,7 +271,19 @@ function applyRuntimeConfig(next: RuntimeConfig): RuntimeConfig {
     input_sources: next.input_sources?.map((s) => String(s)),
     aux_sources: next.aux_sources ? { ...next.aux_sources } : undefined,
   };
-  applyRouting();
+  try {
+    const remoteState = await fetchOpenLiveState();
+    state.program = String(remoteState.program ?? "");
+    state.preview = String(remoteState.preview ?? "");
+    state.aux = {
+      "1": String(remoteState.aux?.["1"] ?? ""),
+      "2": String(remoteState.aux?.["2"] ?? ""),
+      "3": String(remoteState.aux?.["3"] ?? ""),
+      "4": String(remoteState.aux?.["4"] ?? ""),
+    };
+  } catch {
+    // Open Live state endpoint may be temporarily unavailable after apply.
+  }
   return runtimeConfig;
 }
 
@@ -445,8 +321,8 @@ async function sendTelemetryLoop(): Promise<void> {
         node_id: nodeId,
         node_type: "engine",
         ts_ms: Date.now(),
-        metrics: { workers: processes.size, cpu_pct: 0 },
-        auth_mode: "cf_jwt",
+        metrics: { workers: 0, cpu_pct: 0 },
+        auth_mode: "cf_access",
       };
       const raw = JSON.stringify(payload);
       if (Buffer.byteLength(raw, "utf8") <= 255) {
@@ -485,11 +361,33 @@ function accessHeaders(): Record<string, string> {
 const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/healthz") {
-      writeJson(res, 200, { status: "ok", engine: "eyevinn-ts" });
+      let openLiveOK = false;
+      try {
+        const headers: Record<string, string> = {};
+        if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
+        const r = await fetch(joinURL(openLiveBaseURL, openLiveHealthPath), { method: "GET", headers });
+        openLiveOK = r.ok;
+      } catch {
+        openLiveOK = false;
+      }
+      writeJson(res, openLiveOK ? 200 : 503, { status: openLiveOK ? "ok" : "degraded", engine: "eyevinn-openlive-adapter", open_live_ok: openLiveOK });
       return;
     }
     if (req.method === "GET" && req.url === "/api/v1/switch/state") {
       if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
+      try {
+        const remoteState = await fetchOpenLiveState();
+        state.program = String(remoteState.program ?? "");
+        state.preview = String(remoteState.preview ?? "");
+        state.aux = {
+          "1": String(remoteState.aux?.["1"] ?? ""),
+          "2": String(remoteState.aux?.["2"] ?? ""),
+          "3": String(remoteState.aux?.["3"] ?? ""),
+          "4": String(remoteState.aux?.["4"] ?? ""),
+        };
+      } catch {
+        // fallback to last known state
+      }
       writeJson(res, 200, state);
       return;
     }
@@ -501,7 +399,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/v1/runtime/config/apply") {
       if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       const body = (await readBody(req)) as RuntimeConfig;
-      const applied = applyRuntimeConfig({
+      const applied = await applyRuntimeConfig({
         inputs: Number(body.inputs),
         pgm_count: Number(body.pgm_count),
         aux_count: Number(body.aux_count),
@@ -514,18 +412,37 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/v1/switch/program") {
       if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       const body = await readBody(req);
-      state.program = String(body.source ?? "").trim();
-      if (!state.program) return writeJson(res, 400, { error: "source required" });
-      applyRouting();
-      writeJson(res, 200, { applied: true, program: state.program });
+      const source = String(body.source ?? "").trim();
+      if (!source) return writeJson(res, 400, { error: "source required" });
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
+      const forward = await fetch(joinURL(openLiveBaseURL, "/api/v1/switch/program"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ source }),
+      });
+      const raw = await forward.text();
+      if (!forward.ok) return writeJson(res, forward.status, { error: raw || "open live switch program failed" });
+      state.program = source;
+      writeJson(res, 200, { applied: true, program: state.program, open_live_raw: raw });
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/preview") {
       if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       const body = await readBody(req);
-      state.preview = String(body.source ?? "").trim();
-      if (!state.preview) return writeJson(res, 400, { error: "source required" });
-      writeJson(res, 200, { applied: true, preview: state.preview });
+      const source = String(body.source ?? "").trim();
+      if (!source) return writeJson(res, 400, { error: "source required" });
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
+      const forward = await fetch(joinURL(openLiveBaseURL, "/api/v1/switch/preview"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ source }),
+      });
+      const raw = await forward.text();
+      if (!forward.ok) return writeJson(res, forward.status, { error: raw || "open live switch preview failed" });
+      state.preview = source;
+      writeJson(res, 200, { applied: true, preview: state.preview, open_live_raw: raw });
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/aux") {
@@ -535,9 +452,17 @@ const server = createServer(async (req, res) => {
       const source = String(body.source ?? "").trim();
       if (!["1", "2", "3", "4"].includes(channel)) return writeJson(res, 400, { error: "channel must be 1..4" });
       if (!source) return writeJson(res, 400, { error: "source required" });
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
+      const forward = await fetch(joinURL(openLiveBaseURL, "/api/v1/switch/aux"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ channel, source }),
+      });
+      const raw = await forward.text();
+      if (!forward.ok) return writeJson(res, forward.status, { error: raw || "open live switch aux failed" });
       state.aux[channel as "1" | "2" | "3" | "4"] = source;
-      applyRouting();
-      writeJson(res, 200, { applied: true, channel, source });
+      writeJson(res, 200, { applied: true, channel, source, open_live_raw: raw });
       return;
     }
     writeJson(res, 404, { error: "not found" });
@@ -546,24 +471,12 @@ const server = createServer(async (req, res) => {
   }
 });
 
-process.on("SIGTERM", () => {
-  for (const item of processes.values()) item.proc.kill("SIGTERM");
-  process.exit(0);
-});
-process.on("SIGINT", () => {
-  for (const item of processes.values()) item.proc.kill("SIGTERM");
-  process.exit(0);
-});
+process.on("SIGTERM", () => process.exit(0));
+process.on("SIGINT", () => process.exit(0));
 
-bootstrapStateFromInputs();
-if (Object.keys(activeInputs).length > 0) {
-  applyRouting();
-} else {
-  runtimeConfig.aux_count = 0;
-  console.log("[engine] no input URIs configured at boot; waiting runtime config apply");
-}
 server.listen(controlPort, controlHost, () => {
-  console.log(`[engine] Eyevinn TS control API on ${controlHost}:${controlPort}`);
+  console.log(`[engine] Eyevinn Open Live adapter API on ${controlHost}:${controlPort}`);
+  console.log(`[engine] Open Live base: ${openLiveBaseURL}`);
 });
 
 if (telemetryEnabled) {

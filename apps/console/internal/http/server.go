@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -764,16 +765,35 @@ func validateRuntimeConfig(cfg runtimeConfig) error {
 		return fmt.Errorf("input_sources cannot exceed 8 entries")
 	}
 	for i, src := range cfg.InputSources {
-		if strings.TrimSpace(src) == "" {
+		source := strings.TrimSpace(src)
+		if source == "" {
 			return fmt.Errorf("input_sources[%d] is empty", i)
+		}
+		if !strings.HasPrefix(source, "srt://") {
+			return fmt.Errorf("input_sources[%d] must be srt:// URI", i)
 		}
 	}
 	for k, v := range cfg.AUXSources {
 		if k != "1" && k != "2" && k != "3" && k != "4" {
 			return fmt.Errorf("aux_sources keys must be 1..4")
 		}
-		if strings.TrimSpace(v) == "" {
+		source := strings.TrimSpace(v)
+		if source == "" {
 			return fmt.Errorf("aux_sources[%s] is empty", k)
+		}
+		if strings.HasPrefix(source, "srt://") {
+			continue
+		}
+		if !strings.HasPrefix(source, "input") {
+			return fmt.Errorf("aux_sources[%s] must be inputN or srt:// URI", k)
+		}
+		idxRaw := strings.TrimPrefix(source, "input")
+		idx, err := strconv.Atoi(idxRaw)
+		if err != nil {
+			return fmt.Errorf("aux_sources[%s] must be inputN or srt:// URI", k)
+		}
+		if idx < 1 || idx > cfg.Inputs {
+			return fmt.Errorf("aux_sources[%s] input index out of range", k)
 		}
 	}
 	return nil

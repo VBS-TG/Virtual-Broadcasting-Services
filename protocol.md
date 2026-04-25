@@ -90,19 +90,23 @@
 
 ## VBS-Engine（`apps/engine`）
 
-基於 **Eyevinn 風格 TypeScript/Node 媒體核心**：**最多 8 路 SRT（`uri` 入）**、切換盤 API（Program/Preview/AUX）、**PGM + 4 路 AUX** 以 SRT Caller 輸出至 Route。  
-**WSS 遙測**：已實作（1Hz，單筆 ≤255 bytes），可使用 Cloudflare Access JWT 或 Service Token。
+Engine 節點採 **Eyevinn Open Live 官方核心 + 本專案 Adapter**。  
+若 Open Live 受限，次選 **Eyevinn 官方 Strom-based flow**，但契約仍由 Adapter 對外提供。  
+本專案 **不再實作本地渲染/混流核心**；僅保留控制命令轉譯、權限驗證、健康檢查、Runtime 契約與回滾。  
+**WSS 遙測**：已實作（1Hz，單筆 ≤255 bytes），支援 Cloudflare Access JWT 或 Service Token。
 
 ### 環境變數（Engine 容器）
 
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
-| `VBS_ENGINE_SRT_INPUT_1_URI` ~ `VBS_ENGINE_SRT_INPUT_8_URI` | 否 | 啟動預設輸入 URI；可不設定，改由 `POST /api/v1/runtime/config/apply` 動態下發。 |
-| `VBS_ENGINE_PGM_SRT_URI` | 否 | PGM 輸出之 SRT Caller 完整 URI；未填可由 Relay host/port + streamid 自動組合。 |
-| `VBS_ENGINE_AUX1_SRT_URI` ~ `VBS_ENGINE_AUX4_SRT_URI` | 否 | AUX 輸出之 SRT Caller URI；未填可由 Relay host/port + streamid 自動組合。 |
-| `VBS_ENGINE_MIXER_WIDTH` | 否 | 預設 `854`（約 480p 16:9 寬） |
-| `VBS_ENGINE_MIXER_HEIGHT` | 否 | 預設 `480` |
-| `VBS_ENGINE_CONTROL_BIND_HOST` / `VBS_ENGINE_CONTROL_BIND_PORT` | 否 | Engine 切換盤 API 監聽位址，預設 `0.0.0.0:5010`。 |
+| `VBS_EYEVINN_OPENLIVE_BASE_URL` | 是 | Open Live 控制 API 根位址（例：`https://vbsrtc.cyblisswisdom.org`）。 |
+| `VBS_EYEVINN_OPENLIVE_APPLY_PATH` | 否 | Open Live runtime apply 路徑，預設 `/api/v1/runtime/config/apply`。 |
+| `VBS_EYEVINN_OPENLIVE_STATE_PATH` | 否 | Open Live switch state 路徑，預設 `/api/v1/switch/state`。 |
+| `VBS_EYEVINN_OPENLIVE_HEALTH_PATH` | 否 | Open Live health 路徑，預設 `/healthz`。 |
+| `VBS_EYEVINN_OPENLIVE_AUTH_TOKEN` | 否 | Adapter 呼叫 Open Live 時附帶的 Bearer token。 |
+| `VBS_ENGINE_MIXER_WIDTH` | 否 | Open Live / Strom flow 的輸出解析度參數（若該官方流程支援）。 |
+| `VBS_ENGINE_MIXER_HEIGHT` | 否 | Open Live / Strom flow 的輸出解析度參數（若該官方流程支援）。 |
+| `VBS_ENGINE_CONTROL_BIND_HOST` / `VBS_ENGINE_CONTROL_BIND_PORT` | 否 | Engine adapter 控制 API 監聽位址（供 Console 呼叫）。 |
 | `VBS_CF_ACCESS_JWT` | 條件必填 | Engine telemetry 與 Console guest introspect 請求可用的 Cloudflare Access JWT（Bearer）；未提供時需改用 Service Token。 |
 | `VBS_CF_ACCESS_CLIENT_ID` / `VBS_CF_ACCESS_CLIENT_SECRET` | 條件必填 | Engine telemetry 與 Console guest introspect 可用的 Cloudflare Service Token；未提供時需改用 `VBS_CF_ACCESS_JWT`。 |
 | `VBS_CF_ACCESS_AUD` | 是 | Cloudflare Access JWT audience（Single AUD，Engine 控制 API 驗簽用）。 |
@@ -120,27 +124,27 @@
 
 | 用途 | 預設 |
 | :--- | :--- |
-| Engine 控制 API（switch/program/preview/aux） | `5010` TCP（`network_mode: host` 時為主機 `5010`） |
-| Engine 輸入輸出資料平面 | 依 SRT URI 與 Relay 設定決定 |
+| Engine 控制 API（switch/program/preview/aux） | `5000` TCP（`network_mode: host` 時為主機 `5000`） |
+| Engine 媒體資料平面 | 由 Open Live/Strom 官方核心管理（本 Adapter 不直接承載） |
 
 ### CI/CD
 
 - Workflow：`.github/workflows/vbs-engine-publish.yml`
 - 映像：`ghcr.io/<owner小寫>/<repo小寫>/vbs-engine`
 
-### 控制 API（Engine）
+### 控制 API（Engine Adapter）
 
 - `POST /api/v1/switch/program`：切 Program 來源（body：`{"source":"input1..input8|srt://..."}`）。
 - `POST /api/v1/switch/preview`：切 Preview 來源（body：同上）。
 - `POST /api/v1/switch/aux`：切 AUX 路由（body：`{"channel":"1..4","source":"input1..input8|srt://..."}`）。
 - `GET /api/v1/switch/state`：查目前 Program/Preview/AUX 狀態。
 - `GET /api/v1/runtime/config`：查 Engine 當前 Runtime 配置（inputs/pgm_count/aux_count）。
-- `POST /api/v1/runtime/config/apply`：套用 Runtime 配置（body 範例：`{"inputs":8,"pgm_count":1,"aux_count":4,"input_sources":[...],"aux_sources":{"1":"input1"}}`）。
+- `POST /api/v1/runtime/config/apply`：套用 Runtime 配置（body 範例：`{"inputs":8,"pgm_count":1,"aux_count":4,"input_sources":["srt://..."],"aux_sources":{"1":"input1"}}`），由 adapter 轉譯到 Open Live（或 Strom 備援）官方配置格式。
 
 ### 部署
 
-- 於 repo 根目錄建立 `.env.engine`（含 SRT URI、Console、`VBS_CF_ACCESS_*` 等），再執行：`docker compose -f docker-compose.engine.yml up --build`（會自動載入 `.env.engine`，無需再於 shell 匯出同名變數）。若曾用舊版 compose 殘留容器（例如 nginx），可加 `--remove-orphans` 一併清掉。
-- 需 **NVIDIA Container Toolkit** 與主機驅動；映像基底為 `nvidia/cuda:12.2.0-runtime-ubuntu22.04`。
+- 於 repo 根目錄建立 `.env.engine`（含 Open Live、Console、`VBS_CF_ACCESS_*` 等），再執行：`docker compose -f docker-compose.engine.yml up --build`（會自動載入 `.env.engine`，無需再於 shell 匯出同名變數）。若曾用舊版 compose 殘留容器（例如 nginx），可加 `--remove-orphans` 一併清掉。
+- Engine 容器是 Open Live 官方核心的控制代理層（Adapter）；本專案不再依賴本地自建媒體核心鏈。
 - Engine（rtc 子網域）：`docs/deploy/cloudflared-rtc.example.yml`
 - Console/API（api 子網域）：`docs/deploy/cloudflared-api.example.yml`
 - 重要原則：Tunnel 只代理信令，WebRTC 媒體走 ICE/UDP 直連。

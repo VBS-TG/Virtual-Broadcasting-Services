@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${VBS_SRT_PASSPHRASE:-}" ]]; then
-  echo "錯誤: 需設定 VBS_SRT_PASSPHRASE（AES-256）" >&2
+if [[ -z "${VBS_EYEVINN_OPENLIVE_BASE_URL:-}" ]]; then
+  echo "錯誤: 需設定 VBS_EYEVINN_OPENLIVE_BASE_URL（Eyevinn Open Live 控制端點）" >&2
   exit 1
 fi
 
@@ -24,6 +24,6 @@ if [[ "${VBS_ENGINE_CONTROL_API_ENABLED:-1}" != "0" ]]; then
   fi
 fi
 
-echo "[vbs-engine] 啟動 Eyevinn TypeScript engine core..."
+echo "[vbs-engine] 啟動 Eyevinn Open Live adapter..."
 exec node /opt/vbs-engine/dist/index.js
 

@@ -1,5 +1,5 @@
-# VBS-Engine：Eyevinn TypeScript core + FFmpeg，主機需可用 GPU 驅動（如啟用硬體能力）。
-# 必填變數（SRT URI、Console、Cloudflare Access）請寫入同目錄 .env.engine（勿提交版本庫）。
+# VBS-Engine：Eyevinn Open Live adapter（不含本地自研渲染核心）。
+# 必填變數（Open Live、Console、Cloudflare Access）請寫入同目錄 .env.engine（勿提交版本庫）。
 # 若無 .env.engine，Compose 不會再對缺漏的 ${VAR} 發警告；請仍須建立該檔後再啟動。
 # 若出現 orphan containers（例如舊版曾含 nginx）：`docker compose -f docker-compose.engine.yml up -d --build --remove-orphans`
 services:
@@ -8,39 +8,14 @@ services:
       context: .
       dockerfile: apps/engine/Dockerfile
     network_mode: host
-    runtime: nvidia
     env_file:
       - path: .env.engine
         required: false
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
       - VBS_ENGINE_MIXER_WIDTH=854
       - VBS_ENGINE_MIXER_HEIGHT=480
-      # Eyevinn Engine 由兩路輸入 + 切換 API 控制 PGM/AUX 輸出。
-      # 可於 .env.engine 預先設定輸入；若留空可改由 Runtime API 動態下發：
-      # - VBS_ENGINE_SRT_INPUT_1_URI=...
-      # - VBS_ENGINE_SRT_INPUT_2_URI=...
-      # - VBS_ENGINE_SRT_INPUT_3_URI=...
-      # - VBS_ENGINE_SRT_INPUT_4_URI=...
-      # - VBS_ENGINE_SRT_INPUT_5_URI=...
-      # - VBS_ENGINE_SRT_INPUT_6_URI=...
-      # - VBS_ENGINE_SRT_INPUT_7_URI=...
-      # - VBS_ENGINE_SRT_INPUT_8_URI=...
-      # Relay 模式（建議）：不填 VBS_ENGINE_PGM_SRT_URI，改由以下參數自動組 publish/read StreamID
-      # - VBS_ROUTE_PGM_RELAY_HOST=route.example.com
-      # - VBS_ROUTE_PGM_RELAY_PORT=20030
-      # - VBS_ROUTE_PGM_PUBLIC_HOST=live.example.com   # 可選，僅用於顯示 read URL
-      # - VBS_PGM_STREAM_UUID=<uuid>                   # 可選，未填會自動產生
-      # - VBS_ENGINE_PGM_SRT_LATENCY_MS=200
-      # - VBS_SRT_PASSPHRASE=your-passphrase
       - PORT=5000
       - VBS_ENGINE_API_PORT=5000
-      - VBS_ENGINE_PGM_TCP_PORT=30090
-      - VBS_ENGINE_AUX1_TCP_PORT=30091
-      - VBS_ENGINE_AUX2_TCP_PORT=30092
-      - VBS_ENGINE_AUX3_TCP_PORT=30093
-      - VBS_ENGINE_AUX4_TCP_PORT=30094
       - VBS_ENGINE_TELEMETRY_ENABLED=1
       - VBS_ENGINE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
       - VBS_METRICS_INTERVAL_SEC=1
@@ -52,4 +27,4 @@ services:
       - VBS_CONSOLE_JWT_ISSUER=vbs-console
       - VBS_ENGINE_CONTROL_API_ENABLED=1
       - VBS_ENGINE_CONTROL_BIND_HOST=0.0.0.0
-      - VBS_ENGINE_CONTROL_BIND_PORT=5010
+      - VBS_ENGINE_CONTROL_BIND_PORT=5000
