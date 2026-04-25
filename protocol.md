@@ -151,7 +151,7 @@ Engine 節點採 **Eyevinn Open Live 官方核心 + 本專案 Adapter**。
 
 ---
 
-## VBS-Console（`apps/console`，MVP-A）
+## VBS-Console（`apps/console_backend`，MVP-A）
 
 Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 配置編排中心（Orchestrator）** 與 **節點最新狀態內存快照** 的最小服務；預設 HTTP `:4000`，本倉庫 `docker-compose.console.yml` 將主機埠映射為 **5000**（避免與本機 4000 衝突）；對外可經 Cloudflare Tunnel（見 `docs/deploy/cloudflared-api.example.yml`）。
 

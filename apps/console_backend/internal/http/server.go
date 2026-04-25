@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"vbs/apps/console/internal/auth"
-	"vbs/apps/console/internal/config"
-	"vbs/apps/console/internal/telemetry"
+	"vbs/apps/console_backend/internal/auth"
+	"vbs/apps/console_backend/internal/config"
+	"vbs/apps/console_backend/internal/telemetry"
 
 	"github.com/gorilla/websocket"
 )

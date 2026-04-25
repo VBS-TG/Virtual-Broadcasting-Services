@@ -9,7 +9,7 @@ COPY . .
 
 ENV GOOS=linux GOARCH=amd64 CGO_ENABLED=0
 
-RUN go build -trimpath -ldflags="-s -w" -o /out/console-server ./apps/console/cmd/console-server
+RUN go build -trimpath -ldflags="-s -w" -o /out/console-server ./apps/console_backend/cmd/console-server
 
 FROM debian:bullseye-slim
 

@@ -9,7 +9,7 @@ on:
     tags:
       - "v*"
     paths:
-      - "apps/console/**"
+      - "apps/console_backend/**"
       - "docker-compose.console.yml"
       - ".github/workflows/vbs-console-publish.yml"
 
@@ -68,7 +68,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/console/Dockerfile
+          file: apps/console_backend/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

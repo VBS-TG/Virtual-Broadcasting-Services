@@ -5,7 +5,7 @@ services:
   console:
     build:
       context: .
-      dockerfile: apps/console/Dockerfile
+      dockerfile: apps/console_backend/Dockerfile
     ports:
       - "5000:4000"
     env_file:

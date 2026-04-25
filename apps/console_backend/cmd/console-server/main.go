@@ -4,8 +4,8 @@ package main
 import (
 	"log"
 
-	"vbs/apps/console/internal/config"
-	httpserver "vbs/apps/console/internal/http"
+	"vbs/apps/console_backend/internal/config"
+	httpserver "vbs/apps/console_backend/internal/http"
 )
 
 func main() {
