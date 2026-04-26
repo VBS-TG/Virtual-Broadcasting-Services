@@ -30,8 +30,8 @@ export default function Login({ onLogin }: LoginProps) {
       <div className="flex-1 flex justify-center md:justify-start md:pl-16 lg:pl-24 w-full z-10">
         <div className="glass rounded-2xl p-8 w-full max-w-sm animate-slide-in" style={{ animationDelay: '100ms', animationFillMode: 'both' }}>
           <div className="mb-8">
-            <h1 className="text-sm font-bold text-vbs-text mb-2">系統登入</h1>
-            <p className="text-sm font-medium text-vbs-muted">請輸入您的信箱或專屬租賃碼</p>
+            <h1 className="text-[17px] font-bold text-vbs-text mb-2">系統登入</h1>
+            <p className="text-[17px] font-medium text-vbs-muted">請輸入您的信箱或專屬租賃碼</p>
           </div>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -63,8 +63,8 @@ export default function Login({ onLogin }: LoginProps) {
           </form>
           
           <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-between">
-            <span className="text-sm text-vbs-muted">Zero Trust Access</span>
-            <span className="text-sm text-vbs-muted">v1.2.0</span>
+            <span className="text-[17px] text-vbs-muted">Zero Trust Access</span>
+            <span className="text-[17px] text-vbs-muted">v1.2.0</span>
           </div>
         </div>
       </div>

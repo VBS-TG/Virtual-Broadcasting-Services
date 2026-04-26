@@ -8,17 +8,19 @@ module.exports = {
     extend: {
       colors: {
         vbs: {
-          carbon: '#0d0d10',
-          dark:   '#111116',
-          navy:   '#0a1628',
-          blue:   '#0d1f3e',
-          mid:    '#0f2a55',
-          pgm:    '#FF3B3B',
-          pvw:    '#10B981',
-          accent: '#1E90FF',
-          text:   '#E2E8F0',
-          muted:  '#64748B',
-          dim:    '#334155',
+          carbon:  '#0d0d10',
+          dark:    '#111116',
+          navy:    '#0a1628',
+          blue:    '#0d1f3e',
+          mid:     '#0f2a55',
+          pgm:     '#FF3B3B',
+          pvw:     '#10B981',
+          accent:  '#1E90FF',
+          cyan:    '#22D3EE',
+          warning: '#F59E0B',
+          text:    '#E2E8F0',
+          muted:   '#64748B',
+          dim:     '#334155',
         }
       },
       fontFamily: {

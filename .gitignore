@@ -1,4 +1,17 @@
 __pycache__/
 *.pyc
 env/
-apps/console_frontend/node_modules/
+# apps/console_frontend/ Logs
+apps/console_frontend/logs
+apps/console_frontend/*.log
+apps/console_frontend/npm-debug.log*
+apps/console_frontend/yarn-debug.log*
+apps/console_frontend/yarn-error.log*
+apps/console_frontend/pnpm-debug.log*
+apps/console_frontend/lerna-debug.log*
+
+# apps/console_frontend/ Dependencies and Build outputs
+apps/console_frontend/node_modules
+apps/console_frontend/dist
+apps/console_frontend/dist-ssr
+apps/console_frontend/*.local
