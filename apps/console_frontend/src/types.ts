@@ -18,6 +18,7 @@ export interface AuthUser {
   role: UserRole
   tokenPreview: string // e.g. "eyJhb...xyz1"
   expiresAt: number | null
+  email?: string
 }
 
 // ── 節點狀態（Dashboard 用） ──────────────────────────────────────────────────
@@ -83,6 +84,7 @@ export interface OperationLogEntry {
 // ── App Settings ──────────────────────────────────────────────────────────────
 export interface AppSettings {
   apiBaseUrl: string
+  engineBaseUrl: string
   refreshInterval: number // ms
   theme: 'dark' | 'light'
   apiTimeoutMs: number

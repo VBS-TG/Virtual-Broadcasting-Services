@@ -1,14 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useSwitcherStore } from '../stores/switcherStore'
+import { useRuntimeStore } from '../stores/runtimeStore'
 
 interface SwitcherProps {
   compact?: boolean
   fullScreen?: boolean
 }
 
-// [MOCK] 輸入源標籤目前固定
-// TODO: 後端就緒後從 runtimeStore 取得動態標籤
-const INPUTS = [
+const DEFAULT_INPUTS = [
   { id: 1, label: 'IN-1' }, { id: 2, label: 'IN-2' },
   { id: 3, label: 'IN-3' }, { id: 4, label: 'IN-4' },
   { id: 5, label: 'IN-5' }, { id: 6, label: 'IN-6' },
@@ -39,8 +38,9 @@ function RateInput({ id, value, onChange }: {
   )
 }
 
-function BusRow({ label, activeId, bus, fullScreen, onSelect }: {
+function BusRow({ label, activeId, bus, fullScreen, inputs, onSelect }: {
   label: string; activeId: number; bus: 'pgm' | 'pvw'; fullScreen?: boolean;
+  inputs: Array<{ id: number; label: string }>;
   onSelect: (id: number) => void
 }) {
   return (
@@ -49,7 +49,7 @@ function BusRow({ label, activeId, bus, fullScreen, onSelect }: {
         {label}
       </span>
       <div className={`grid grid-cols-4 gap-2 sm:gap-3 ${fullScreen ? 'flex-1' : ''}`}>
-        {INPUTS.map((inp) => {
+        {inputs.map((inp) => {
           const isActive = activeId === inp.id
           return (
             <button key={inp.id} id={`${bus}-btn-${inp.id}`}
@@ -121,13 +121,24 @@ function TBar({ position, onDrag }: { position: number; onDrag: (v: number) => v
 
 export default function Switcher({ compact, fullScreen }: SwitcherProps) {
   const { state, setProgram, setPreview } = useSwitcherStore()
+  const runtimeInputs = useRuntimeStore((s) => s.config?.inputs ?? 8)
   const [tbarPos, setTbarPos] = useState(0)
+  const inputs = DEFAULT_INPUTS.slice(0, Math.max(1, Math.min(8, runtimeInputs)))
+
   const [transitioning, setTransitioning] = useState(false)
   const [ftbOn, setFtbOn] = useState(false)
   const [autoRate, setAutoRate] = useState('01:00')
   const [ftbRate, setFtbRate] = useState('01:00')
+  const [lastOp, setLastOp] = useState<{ time: string; payload: any; error?: string } | null>(null)
   const rafRef = useRef<number | null>(null)
   const cooldown = useRef(false)
+
+  const logOp = useCallback((action: string, payload: any) => {
+    setLastOp({
+      time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
+      payload: { action, ...payload }
+    })
+  }, [])
 
   const animateTo = useCallback((from: number, to: number, ms: number, done?: () => void) => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -151,8 +162,9 @@ export default function Switcher({ compact, fullScreen }: SwitcherProps) {
     setProgram(np)
     setPreview(nv)
     setTbarPos(0)
+    logOp('CUT', { program: np, preview: nv })
     setTimeout(() => { cooldown.current = false }, 120)
-  }, [state, setProgram, setPreview])
+  }, [state, setProgram, setPreview, logOp])
 
   const doAuto = useCallback(() => {
     if (cooldown.current || transitioning) return
@@ -162,16 +174,17 @@ export default function Switcher({ compact, fullScreen }: SwitcherProps) {
         setProgram(state.preview)
         setPreview(state.program)
         setTbarPos(0)
+        logOp('AUTO', { program: state.preview, preview: state.program, rate: autoRate })
       }
     })
-  }, [state, tbarPos, autoRate, transitioning, animateTo, setProgram, setPreview])
+  }, [state, tbarPos, autoRate, transitioning, animateTo, setProgram, setPreview, logOp])
 
   const doFtb = useCallback(() => {
     if (cooldown.current) return
     cooldown.current = true
-    if (!ftbOn) { setFtbOn(true); animateTo(0, 100, parseRate(ftbRate)) }
-    else { setFtbOn(false); animateTo(100, 0, parseRate(ftbRate)) }
-  }, [ftbOn, ftbRate, animateTo])
+    if (!ftbOn) { setFtbOn(true); animateTo(0, 100, parseRate(ftbRate)); logOp('FTB_ON', { rate: ftbRate }) }
+    else { setFtbOn(false); animateTo(100, 0, parseRate(ftbRate)); logOp('FTB_OFF', { rate: ftbRate }) }
+  }, [ftbOn, ftbRate, animateTo, logOp])
 
   const handleTbarDrag = useCallback((v: number) => {
     if (transitioning) return
@@ -179,9 +192,10 @@ export default function Switcher({ compact, fullScreen }: SwitcherProps) {
     if (v >= 99.5) {
       setProgram(state.preview)
       setPreview(state.program)
+      logOp('TBAR_COMPLETE', { program: state.preview, preview: state.program })
       setTimeout(() => setTbarPos(0), 80)
     }
-  }, [state, transitioning, setProgram, setPreview])
+  }, [state, transitioning, setProgram, setPreview, logOp])
 
   return (
     <div className={`${fullScreen ? 'w-full h-full flex flex-col gap-2' : `glass rounded-xl flex flex-col gap-4 ${compact ? 'p-4' : 'p-6 md:p-8'}`}`}>
@@ -196,8 +210,10 @@ export default function Switcher({ compact, fullScreen }: SwitcherProps) {
         {/* Bus Buttons */}
         <div className={`flex flex-col gap-4 justify-between ${fullScreen ? 'h-full' : ''}`}>
           <BusRow label="PGM" activeId={state.program} bus="pgm" fullScreen={fullScreen}
+            inputs={inputs}
             onSelect={(id) => { if (!cooldown.current) setProgram(id) }} />
           <BusRow label="PVW" activeId={state.preview} bus="pvw" fullScreen={fullScreen}
+            inputs={inputs}
             onSelect={(id) => { if (!cooldown.current) setPreview(id) }} />
         </div>
 
@@ -247,6 +263,24 @@ export default function Switcher({ compact, fullScreen }: SwitcherProps) {
           </div>
         </div>
       </div>
+
+      {/* ── Last Operation Result ── */}
+      {!fullScreen && !compact && (
+        <div className="mt-2 border-t border-white/5 pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[14px] font-black text-vbs-muted uppercase tracking-widest">Last Request</span>
+          </div>
+          {lastOp ? (
+            <div className="glass-dark rounded-lg p-3 font-mono text-[13px] text-vbs-text break-all border border-white/5">
+              <span className="text-vbs-accent mr-2">[{lastOp.time}]</span> 
+              <span className="opacity-80">{JSON.stringify(lastOp.payload)}</span>
+              {lastOp.error && <span className="text-vbs-pgm ml-2">Error: {lastOp.error}</span>}
+            </div>
+          ) : (
+            <span className="text-[13px] text-vbs-muted">尚未執行切換操作</span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

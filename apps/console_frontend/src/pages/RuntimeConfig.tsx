@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRuntimeStore } from '../stores/runtimeStore'
+import { useToastStore } from '../stores/toastStore'
+import { canAccess } from '../lib/permissions'
 import type { RuntimeConfig } from '../types'
 
 // 前端驗證規則（frontend.md §4.3）
@@ -26,17 +28,16 @@ export default function RuntimeConfig() {
   const { config, loading, saving, applying, error, lastApplyResult, fetch, save, apply } =
     useRuntimeStore()
 
-  // Local draft
   const [draft, setDraft] = useState<RuntimeConfig | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  
+  const isAdmin = canAccess('admin')
 
   useEffect(() => { fetch() }, [fetch])
   useEffect(() => { if (config && !draft) setDraft({ ...config }) }, [config, draft])
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 3000)
+    useToastStore.getState().addToast({ title: msg, type })
   }
 
   const handleSave = async () => {
@@ -148,7 +149,7 @@ export default function RuntimeConfig() {
             <div className="glass rounded-xl p-4 flex flex-col gap-3">
               <span className="text-[15px] font-black text-vbs-muted uppercase tracking-widest">AUX Sources</span>
               {Array.from({ length: draft.aux_count }, (_, i) => {
-                const key = `aux${i + 1}`
+                const key = String(i + 1)
                 return (
                   <div key={key} className="flex gap-2 items-center">
                     <span className="text-[15px] text-vbs-muted w-10 shrink-0">AUX {i + 1}</span>
@@ -174,20 +175,22 @@ export default function RuntimeConfig() {
             <button
               id="runtime-save"
               onClick={handleSave}
-              disabled={saving}
-              className="flex-1 py-3 rounded-xl font-bold text-[17px] border
-                glass border-vbs-accent/40 text-vbs-accent hover:bg-vbs-accent/15 hover:border-vbs-accent
-                transition-all active:scale-95 disabled:opacity-50"
+              disabled={saving || !isAdmin}
+              title={!isAdmin ? "權限不足：僅管理員可儲存" : ""}
+              className={`flex-1 py-3 rounded-xl font-bold text-[17px] border transition-all active:scale-95
+                ${saving || !isAdmin ? 'glass border-white/5 text-vbs-muted opacity-50 cursor-not-allowed' : 'glass border-vbs-accent/40 text-vbs-accent hover:bg-vbs-accent/15 hover:border-vbs-accent'}
+              `}
             >
               {saving ? '儲存中…' : ' Save'}
             </button>
             <button
               id="runtime-apply"
               onClick={handleApply}
-              disabled={applying}
-              className="flex-1 py-3 rounded-xl font-bold text-[17px] border
-                glass border-vbs-pvw/40 text-vbs-pvw hover:bg-vbs-pvw/15 hover:border-vbs-pvw
-                transition-all active:scale-95 disabled:opacity-50"
+              disabled={applying || !isAdmin}
+              title={!isAdmin ? "權限不足：僅管理員可 Apply" : ""}
+              className={`flex-1 py-3 rounded-xl font-bold text-[17px] border transition-all active:scale-95
+                ${applying || !isAdmin ? 'glass border-white/5 text-vbs-muted opacity-50 cursor-not-allowed' : 'glass border-vbs-pvw/40 text-vbs-pvw hover:bg-vbs-pvw/15 hover:border-vbs-pvw'}
+              `}
             >
               {applying ? 'Apply 中…' : ' Apply'}
             </button>
@@ -203,15 +206,6 @@ export default function RuntimeConfig() {
             </div>
           )}
         </>
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-20 lg:bottom-6 left-1/2 -translate-x-1/2 glass px-5 py-2.5 rounded-xl
-          text-[15px] font-semibold text-vbs-text animate-slide-in shadow-lg z-50 whitespace-nowrap border
-          ${toast.type === 'success' ? 'border-vbs-pvw/40' : 'border-vbs-pgm/40'}`}>
-          {toast.msg}
-        </div>
       )}
     </div>
   )

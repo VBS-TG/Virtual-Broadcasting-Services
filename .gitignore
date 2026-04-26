@@ -16,6 +16,11 @@ apps/console_frontend/dist
 apps/console_frontend/dist-ssr
 apps/console_frontend/*.local
 
+
 # apps/engine Dependencies and Build outputs
 apps/engine/node_modules
 apps/engine/dist
+
+#規範檔
+.cursorrules
+apps/console_frontend/frontend_Revise.md

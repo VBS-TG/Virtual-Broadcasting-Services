@@ -2,7 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import logoTxtImg from '../assets/images/vbslogo-txtimg.svg'
 
-import { LayoutDashboard, Settings2, MonitorPlay, Activity, ShieldAlert, FileText, Settings } from 'lucide-react'
+import { LayoutDashboard, Settings2, MonitorPlay, Activity, ShieldAlert, FileText, Settings, Lock } from 'lucide-react'
 
 const NAV_ITEMS = [
   { path: '/dashboard',   label: 'Dashboard',  icon: LayoutDashboard, desc: '總覽'   },
@@ -24,6 +24,8 @@ export default function Sidebar() {
     navigate('/login')
   }
 
+  const isAdmin = user?.role === 'admin'
+
   return (
     <aside className="glass-dark border-r border-white/5 w-16 flex flex-col items-center py-3 gap-1 shrink-0 z-20">
       {/* Logo 小圖示 */}
@@ -33,6 +35,7 @@ export default function Sidebar() {
 
       {NAV_ITEMS.map((item) => {
         const isActive = location.pathname === item.path
+        const isReadOnly = !isAdmin && (item.path === '/runtime' || item.path === '/settings')
         return (
           <button
             key={item.path}
@@ -50,11 +53,14 @@ export default function Sidebar() {
             <item.icon className="w-5 h-5 mb-0.5" />
             <span className="text-[12px] font-mono leading-none opacity-70">{item.desc}</span>
 
+            {isReadOnly && <Lock className="w-3 h-3 absolute top-1 right-1 opacity-50" />}
+
             {/* Tooltip */}
             <span className="absolute left-full ml-2 px-2 py-1 glass rounded-md text-[15px] font-medium text-vbs-text
               whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100
-              transition-opacity duration-150 z-50">
+              transition-opacity duration-150 z-50 flex items-center gap-1">
               {item.label}
+              {isReadOnly && <span className="text-vbs-muted text-[12px] ml-1">(唯讀)</span>}
             </span>
 
             {/* Active bar */}
