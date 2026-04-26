@@ -1,10 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { AuthUser, UserRole } from '../types'
+import { parseJwt } from '../lib/jwt'
 
 interface AuthState {
   user: AuthUser | null
   login: (token: string, role?: UserRole) => void
+  loginAdminByEmail: (email: string) => void
   logout: () => void
   isLoggedIn: () => boolean
 }
@@ -14,21 +16,37 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
 
-      login: (token: string, role: UserRole = 'admin') => {
-        // [MOCK] 角色固定給 admin
-        // TODO: 後端就緒後解析 JWT payload 取得 role & exp
+      login: (token: string, role?: UserRole) => {
+        const payload = parseJwt(token)
+        const tokenRole = role || (payload?.role as UserRole) || 'operator'
+        
         const tokenPreview =
           token.length > 10
             ? `${token.slice(0, 6)}...${token.slice(-4)}`
             : `${token.slice(0, 6)}...`
-        set({ user: { token, role, tokenPreview, expiresAt: null } })
+        set({ user: { token, role: tokenRole, tokenPreview, expiresAt: payload?.exp ? payload.exp * 1000 : null } })
+      },
+
+      loginAdminByEmail: (email: string) => {
+        const normalized = email.trim().toLowerCase()
+        const preview = normalized.length > 24 ? `${normalized.slice(0, 20)}...` : normalized
+        // Admin email mode relies on Cloudflare Access browser session cookie.
+        set({ user: { token: '', role: 'admin', tokenPreview: preview, expiresAt: null, email: normalized } })
       },
 
       logout: () => {
         set({ user: null })
       },
 
-      isLoggedIn: () => get().user !== null,
+      isLoggedIn: () => {
+        const user = get().user
+        if (!user) return false
+        if (user.expiresAt && user.expiresAt <= Date.now()) {
+          set({ user: null })
+          return false
+        }
+        return true
+      },
     }),
     {
       name: 'vbs-auth',

@@ -1,23 +1,6 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// lib/apiClient.ts
-//
-// [MOCK] 目前所有 API 呼叫均回傳假資料。
-// 後端就緒後：
-//   1. 將各函式內的 [MOCK] 區塊整個移除
-//   2. 取消下方 request() 呼叫的註解
-// ─────────────────────────────────────────────────────────────────────────────
-
 import type { RuntimeConfig, ApplyResult, SwitchState, TelemetryLatest } from '../types'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useAuthStore } from '../stores/authStore'
-
-// [MOCK] 假資料延遲（模擬網路）
-const MOCK_DELAY_MS = 450
-
-async function mockDelay<T>(data: T): Promise<ApiResponse<T>> {
-  await new Promise(r => setTimeout(r, MOCK_DELAY_MS))
-  return { data, statusCode: 200, latencyMs: MOCK_DELAY_MS }
-}
 
 export interface ApiResponse<T> {
   data?: T
@@ -26,7 +9,30 @@ export interface ApiResponse<T> {
   latencyMs?: number
 }
 
-// ── 底層 fetch 封裝（後端就緒後啟用） ────────────────────────────────────────
+export interface GuestExchangeResult {
+  access_token: string
+  token_type?: string
+  expires_at?: number
+}
+
+export interface AdminEmailLoginResult {
+  access_token: string
+  token_type?: string
+  expires_at?: number
+  role?: string
+  email?: string
+}
+
+interface NodeRecord {
+  node_type?: string
+  metrics?: Record<string, unknown>
+}
+
+interface PresenceRecord {
+  node_type?: string
+  online?: boolean
+}
+
 export async function request<T>(
   method: 'GET' | 'POST' | 'PUT',
   path: string,
@@ -39,20 +45,21 @@ export async function request<T>(
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), settings.apiTimeoutMs)
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (token) headers.Authorization = `Bearer ${token}`
     const res = await fetch(`${settings.apiBaseUrl}${path}`, {
       method,
       signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     })
     clearTimeout(timeoutId)
     const latencyMs = Math.round(performance.now() - start)
     const data = await res.json().catch(() => null)
     if (!res.ok) {
-      return { error: data?.message ?? `HTTP ${res.status}`, statusCode: res.status, latencyMs }
+      return { error: data?.error ?? data?.message ?? `HTTP ${res.status}`, statusCode: res.status, latencyMs }
     }
     return { data, statusCode: res.status, latencyMs }
   } catch (err) {
@@ -64,114 +71,175 @@ export async function request<T>(
   }
 }
 
-// ── Runtime Config ────────────────────────────────────────────────────────────
-
-export async function getRuntimeConfig(): Promise<ApiResponse<RuntimeConfig>> {
-  // [MOCK] 後端就緒後改為：return request('GET', '/api/v1/runtime/config')
-  return mockDelay<RuntimeConfig>({
-    inputs: 4,
-    pgm_count: 1,
-    aux_count: 2,
-    input_sources: [
-      'srt://capture.vbsapi.cyblisswisdom.org:9001',
-      'srt://capture.vbsapi.cyblisswisdom.org:9002',
-      'srt://capture.vbsapi.cyblisswisdom.org:9003',
-      'srt://capture.vbsapi.cyblisswisdom.org:9004',
-    ],
-    aux_sources: { aux1: 'input1', aux2: 'input2' },
-  })
+function inputNumberToSource(input: number): string {
+  return `input${input}`
 }
 
-export async function putRuntimeConfig(config: RuntimeConfig): Promise<ApiResponse<RuntimeConfig>> {
-  // [MOCK] 後端就緒後改為：return request('PUT', '/api/v1/runtime/config', config)
-  console.log('[MOCK] PUT /api/v1/runtime/config', config)
-  return mockDelay<RuntimeConfig>(config)
+function sourceToInputNumber(source: unknown): number {
+  const raw = String(source ?? '').trim()
+  if (!raw.startsWith('input')) return 1
+  const n = Number(raw.slice('input'.length))
+  return Number.isFinite(n) && n >= 1 && n <= 8 ? n : 1
 }
 
-export async function postApplyConfig(): Promise<ApiResponse<ApplyResult>> {
-  // [MOCK] 後端就緒後改為：return request('POST', '/api/v1/runtime/config/apply')
-  console.log('[MOCK] POST /api/v1/runtime/config/apply')
-  return mockDelay<ApplyResult>({
-    route: true,
-    engine: true,
-    rolled_back: false,
-    message: '[MOCK] Config applied successfully',
-    timestamp: new Date().toISOString(),
-  })
+function parseRuntimeConfig(payload: any): RuntimeConfig {
+  const cfg = payload?.config ?? payload ?? {}
+  const inputSources = Array.isArray(cfg.input_sources) ? cfg.input_sources.map((v: unknown) => String(v)) : []
+  const auxSourcesRaw = cfg.aux_sources && typeof cfg.aux_sources === 'object' ? cfg.aux_sources : {}
+  const auxSources: Record<string, string> = {}
+  for (const [k, v] of Object.entries(auxSourcesRaw)) {
+    auxSources[String(k)] = String(v ?? '')
+  }
+  return {
+    inputs: Number(cfg.inputs ?? 8),
+    pgm_count: Number(cfg.pgm_count ?? 1),
+    aux_count: Number(cfg.aux_count ?? 0),
+    input_sources: inputSources,
+    aux_sources: auxSources,
+  }
 }
 
-// ── Switch ────────────────────────────────────────────────────────────────────
+function parseApplyResult(payload: any): ApplyResult {
+  const routeOK = Boolean(payload?.route?.ok)
+  const engineOK = Boolean(payload?.engine?.ok)
+  const rolled = Boolean(payload?.rolled_back && Object.keys(payload.rolled_back).length > 0)
+  return {
+    route: routeOK,
+    engine: engineOK,
+    rolled_back: rolled,
+    message: routeOK && engineOK ? 'Applied' : 'Apply partially failed',
+    timestamp: new Date((Number(payload?.applied_at ?? 0) || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+  }
+}
 
 export async function getSwitchState(): Promise<ApiResponse<SwitchState>> {
-  // [MOCK] 後端就緒後改為：return request('GET', '/api/v1/switch/state')
-  return mockDelay<SwitchState>({ program: 1, preview: 2, aux: { '1': 1, '2': 2, '3': 3, '4': 4 } })
+  const res = await request<any>('GET', '/api/v1/switch/state')
+  if (res.error) return res as ApiResponse<SwitchState>
+  const d = res.data ?? {}
+  return {
+    ...res,
+    data: {
+      program: sourceToInputNumber(d.program),
+      preview: sourceToInputNumber(d.preview),
+      aux: {
+        '1': sourceToInputNumber(d.aux?.['1']),
+        '2': sourceToInputNumber(d.aux?.['2']),
+        '3': sourceToInputNumber(d.aux?.['3']),
+        '4': sourceToInputNumber(d.aux?.['4']),
+      },
+    },
+  }
 }
 
 export async function switchProgram(input: number): Promise<ApiResponse<void>> {
-  // [MOCK] 後端就緒後改為：return request('POST', '/api/v1/switch/program', { input })
-  console.log('[MOCK] POST /api/v1/switch/program', { input })
-  return mockDelay<void>(undefined)
+  const res = await request<any>('POST', '/api/v1/switch/program', { source: inputNumberToSource(input) })
+  return { ...res, data: undefined }
 }
 
 export async function switchPreview(input: number): Promise<ApiResponse<void>> {
-  // [MOCK] 後端就緒後改為：return request('POST', '/api/v1/switch/preview', { input })
-  console.log('[MOCK] POST /api/v1/switch/preview', { input })
-  return mockDelay<void>(undefined)
+  const res = await request<any>('POST', '/api/v1/switch/preview', { source: inputNumberToSource(input) })
+  return { ...res, data: undefined }
 }
 
 export async function switchAux(channel: number, input: number): Promise<ApiResponse<void>> {
-  // [MOCK] 後端就緒後改為：return request('POST', '/api/v1/switch/aux', { channel, input })
-  console.log('[MOCK] POST /api/v1/switch/aux', { channel, input })
-  return mockDelay<void>(undefined)
+  const res = await request<any>('POST', '/api/v1/switch/aux', {
+    channel: String(channel),
+    source: inputNumberToSource(input),
+  })
+  return { ...res, data: undefined }
 }
-
-// ── Telemetry ─────────────────────────────────────────────────────────────────
 
 export async function getTelemetryLatest(): Promise<ApiResponse<TelemetryLatest>> {
-  // [MOCK] 後端就緒後改為：return request('GET', '/api/v1/telemetry/latest')
-  const r = (base: number, spread: number) =>
-    Math.max(0, base + (Math.random() - 0.5) * spread)
-  return mockDelay<TelemetryLatest>({
-    timestamp: new Date().toISOString(),
-    capture: {
-      online: true,
-      cpu_pct: r(45, 20),
-      mem_pct: r(55, 15),
-      throughput_mbps: r(12, 4),
-      fps: r(60, 2),
-      temp_c: r(58, 8),
-      extra: {
-        'NIC-0 上行': `${r(12, 4).toFixed(1)} Mbps`,
-        'SRTLA 掉包': `${Math.round(r(2, 3))} pkts`,
-      },
+  const res = await request<any>('GET', '/api/v1/telemetry/latest')
+  if (res.error) return res as ApiResponse<TelemetryLatest>
+  const latest = res.data?.latest ?? {}
+  const presence = res.data?.presence ?? {}
+
+  const pickByType = (nodeType: string): [NodeRecord, PresenceRecord] => {
+    for (const [nodeID, rec] of Object.entries(latest as Record<string, NodeRecord>)) {
+      const p = (presence as Record<string, PresenceRecord>)[nodeID]
+      if (String(rec?.node_type ?? '').toLowerCase() === nodeType) return [rec ?? {}, p ?? {}]
+    }
+    return [{}, {}]
+  }
+
+  const toNodeTelemetry = (nodeType: string) => {
+    const [rec, p] = pickByType(nodeType)
+    const m = (rec.metrics ?? {}) as Record<string, unknown>
+    const extraEntries: Array<[string, string | number]> = []
+    for (const [k, v] of Object.entries(m)) {
+      if (['cpu_percent', 'cpu_pct', 'mem_pct', 'throughput_mbps', 'total_ingest_mbps', 'fps', 'temp_c'].includes(k)) continue
+      if (typeof v === 'number' || typeof v === 'string') extraEntries.push([k, v])
+    }
+    return {
+      online: Boolean(p.online),
+      cpu_pct: Number(m.cpu_percent ?? m.cpu_pct ?? 0),
+      mem_pct: Number(m.mem_pct ?? 0),
+      throughput_mbps: Number(m.throughput_mbps ?? m.total_ingest_mbps ?? 0),
+      fps: m.fps !== undefined ? Number(m.fps) : undefined,
+      temp_c: m.temp_c !== undefined ? Number(m.temp_c) : undefined,
+      extra: Object.fromEntries(extraEntries),
+    }
+  }
+
+  return {
+    ...res,
+    data: {
+      timestamp: new Date().toISOString(),
+      capture: toNodeTelemetry('capture'),
+      route: toNodeTelemetry('route'),
+      engine: toNodeTelemetry('engine'),
     },
-    route: {
-      online: true,
-      cpu_pct: r(28, 10),
-      mem_pct: r(45, 8),
-      throughput_mbps: r(22, 5),
-      extra: {
-        '封包排序錯誤率': `${r(0.3, 0.3).toFixed(2)}%`,
-        'Engine 拉流': 'CONNECTED',
-      },
-    },
-    engine: {
-      online: true,
-      cpu_pct: r(40, 15),
-      mem_pct: r(60, 10),
-      throughput_mbps: r(15, 5),
-      fps: r(60, 1),
-      temp_c: r(62, 10),
-      extra: {
-        'GPU 負載': `${r(55, 15).toFixed(0)}%`,
-        '顯存佔用': `${(r(4200, 500) / 1024).toFixed(1)} GB`,
-        '推流狀態': 'SRT → ROUTE ',
-      },
-    },
-  })
+  }
 }
 
-// ── Health Check（實際嘗試連線） ──────────────────────────────────────────────
+export async function getRuntimeConfig(): Promise<ApiResponse<RuntimeConfig>> {
+  const res = await request<any>('GET', '/api/v1/runtime/config')
+  if (res.error) return res as ApiResponse<RuntimeConfig>
+  return { ...res, data: parseRuntimeConfig(res.data) }
+}
+
+export async function putRuntimeConfig(config: RuntimeConfig): Promise<ApiResponse<RuntimeConfig>> {
+  const res = await request<any>('PUT', '/api/v1/runtime/config', config)
+  if (res.error) return res as ApiResponse<RuntimeConfig>
+  return { ...res, data: parseRuntimeConfig(res.data) }
+}
+
+export async function postApplyConfig(): Promise<ApiResponse<ApplyResult>> {
+  const res = await request<any>('POST', '/api/v1/runtime/config/apply')
+  if (res.error) return res as ApiResponse<ApplyResult>
+  return { ...res, data: parseApplyResult(res.data) }
+}
+
+export async function exchangeGuestPIN(pin: string): Promise<ApiResponse<GuestExchangeResult>> {
+  const res = await request<any>('POST', '/api/v1/guest/exchange-pin', { pin })
+  if (res.error) return res as ApiResponse<GuestExchangeResult>
+  const data = res.data ?? {}
+  return {
+    ...res,
+    data: {
+      access_token: String(data.access_token ?? ''),
+      token_type: data.token_type ? String(data.token_type) : undefined,
+      expires_at: data.expires_at !== undefined ? Number(data.expires_at) : undefined,
+    },
+  }
+}
+
+export async function adminEmailLogin(email: string): Promise<ApiResponse<AdminEmailLoginResult>> {
+  const res = await request<any>('POST', '/api/v1/auth/admin/email-login', { email })
+  if (res.error) return res as ApiResponse<AdminEmailLoginResult>
+  const data = res.data ?? {}
+  return {
+    ...res,
+    data: {
+      access_token: String(data.access_token ?? ''),
+      token_type: data.token_type ? String(data.token_type) : undefined,
+      expires_at: data.expires_at !== undefined ? Number(data.expires_at) : undefined,
+      role: data.role ? String(data.role) : undefined,
+      email: data.email ? String(data.email) : undefined,
+    },
+  }
+}
 
 export async function checkHealth(url: string): Promise<{
   statusCode: number | null
@@ -182,11 +250,11 @@ export async function checkHealth(url: string): Promise<{
   const start = performance.now()
   try {
     const controller = new AbortController()
-    setTimeout(() => controller.abort(), 8000)
-    // mode: 'no-cors' 避免 CORS 阻擋，但 status 會是 0
-    const res = await fetch(url, { method: 'GET', signal: controller.signal, mode: 'no-cors' })
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+    const res = await fetch(url, { method: 'GET', signal: controller.signal })
+    clearTimeout(timeoutId)
     const latencyMs = Math.round(performance.now() - start)
-    return { statusCode: res.status || null, latencyMs, ok: true }
+    return { statusCode: res.status || null, latencyMs, ok: res.ok }
   } catch (err) {
     const latencyMs = Math.round(performance.now() - start)
     if ((err as Error).name === 'AbortError') {

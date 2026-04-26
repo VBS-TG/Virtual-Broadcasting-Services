@@ -71,7 +71,7 @@ function NodeCard({ title, dotColor, node }: {
   )
 }
 
-// [MOCK] 舊有隨機動畫邏輯，telemetry store fetch 前的 fallback 顯示
+// 視覺化裝飾：8ch 活動指示條
 function DecoderBar() {
   const [h, setH] = useState(60 + Math.random() * 40)
   useEffect(() => {

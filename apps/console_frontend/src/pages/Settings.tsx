@@ -1,15 +1,19 @@
 import { useState } from 'react'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useToastStore } from '../stores/toastStore'
+import { canAccess } from '../lib/permissions'
 
 export default function Settings() {
   const { settings, update, reset } = useSettingsStore()
   const [saved, setSaved] = useState(false)
 
   const [local, setLocal] = useState({ ...settings })
+  const isAdmin = canAccess('admin')
 
   const handleSave = () => {
     update(local)
     setSaved(true)
+    useToastStore.getState().addToast({ title: '設定已儲存', type: 'success' })
     setTimeout(() => setSaved(false), 2000)
   }
 
@@ -21,18 +25,33 @@ export default function Settings() {
         {/* API Base URL */}
         <div className="flex flex-col gap-1.5">
           <label htmlFor="settings-api-url" className="text-[15px] font-semibold text-vbs-muted uppercase tracking-widest">
-            API Base URL
+            Console API Base URL
           </label>
           <input
             id="settings-api-url"
             type="text"
             value={local.apiBaseUrl}
+            disabled={!isAdmin}
             onChange={(e) => setLocal({ ...local, apiBaseUrl: e.target.value })}
             className="glass-dark border border-white/10 rounded-xl px-4 py-3 text-[17px] font-mono text-vbs-text
-              bg-transparent outline-none focus:border-vbs-accent/50 transition-colors"
-            placeholder="https://vbsapi.cyblisswisdom.org"
+              bg-transparent outline-none focus:border-vbs-accent/50 transition-colors disabled:opacity-50"
           />
-          <p className="text-[12px] text-vbs-muted">所有 API 請求的 Base URL，修改後立即生效。</p>
+        </div>
+
+        {/* Engine Base URL */}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="settings-engine-url" className="text-[15px] font-semibold text-vbs-muted uppercase tracking-widest">
+            Engine Switcher Base URL
+          </label>
+          <input
+            id="settings-engine-url"
+            type="text"
+            value={local.engineBaseUrl}
+            disabled={!isAdmin}
+            onChange={(e) => setLocal({ ...local, engineBaseUrl: e.target.value })}
+            className="glass-dark border border-white/10 rounded-xl px-4 py-3 text-[17px] font-mono text-vbs-text
+              bg-transparent outline-none focus:border-vbs-accent/50 transition-colors disabled:opacity-50"
+          />
         </div>
 
         {/* API Timeout */}
@@ -102,18 +121,20 @@ export default function Settings() {
         <button
           id="settings-save"
           onClick={handleSave}
-          className="flex-1 py-3 rounded-xl font-bold text-[17px] border
-            glass border-vbs-accent/40 text-vbs-accent hover:bg-vbs-accent/15 hover:border-vbs-accent
-            transition-all active:scale-95"
+          disabled={!isAdmin}
+          title={!isAdmin ? "權限不足：僅管理員可修改" : ""}
+          className={`flex-1 py-3 rounded-xl font-bold text-[17px] border transition-all active:scale-95
+            ${!isAdmin ? 'glass border-white/5 text-vbs-muted opacity-50 cursor-not-allowed' : 'glass border-vbs-accent/40 text-vbs-accent hover:bg-vbs-accent/15 hover:border-vbs-accent'}`}
         >
           {saved ? ' 已儲存' : ' 儲存設定'}
         </button>
         <button
           id="settings-reset"
           onClick={() => { reset(); setLocal({ ...settings }) }}
-          className="px-6 py-3 rounded-xl font-bold text-[17px] border
-            glass border-vbs-pgm/30 text-vbs-pgm hover:bg-vbs-pgm/10 hover:border-vbs-pgm
-            transition-all active:scale-95"
+          disabled={!isAdmin}
+          title={!isAdmin ? "權限不足：僅管理員可修改" : ""}
+          className={`px-6 py-3 rounded-xl font-bold text-[17px] border transition-all active:scale-95
+            ${!isAdmin ? 'glass border-white/5 text-vbs-muted opacity-50 cursor-not-allowed' : 'glass border-vbs-pgm/30 text-vbs-pgm hover:bg-vbs-pgm/10 hover:border-vbs-pgm'}`}
         >
            重設預設值
         </button>
