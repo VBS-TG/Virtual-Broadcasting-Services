@@ -192,8 +192,18 @@ async function ensureProduction(): Promise<string> {
     const raw = await create.text();
     throw new Error(`open live create production status=${create.status} body=${raw.slice(0, 200)}`);
   }
+  // Some Open Live builds do not return the production id directly on create.
   const created = (await create.json()) as Record<string, unknown>;
-  activeProductionID = pickString(created, ["id", "_id", "productionId", "production_id", "uuid"]);
+  const candidateID = pickString(created, ["id", "_id", "productionId", "production_id", "uuid"]);
+  if (candidateID) {
+    activeProductionID = candidateID;
+    return activeProductionID;
+  }
+  // Fallback: re-list and pick by name after creation.
+  const listAfterCreateRaw = await openLiveJSON<OpenLiveListResponse<OpenLiveProduction>>("/api/v1/productions");
+  const listAfterCreate = asArray(listAfterCreateRaw);
+  const createdByName = listAfterCreate.find((p) => String(p.name ?? "") === openLiveProductionName);
+  activeProductionID = String(createdByName?.id ?? "").trim();
   if (!activeProductionID) throw new Error("open live create production missing id");
   return activeProductionID;
 }
@@ -240,10 +250,21 @@ async function assignProductionInput(productionID: string, mixerInput: string, s
     mixerInput,
     sourceId: sourceID,
   });
-  if (!res.ok) {
-    const raw = await res.text();
-    throw new Error(`open live assign source status=${res.status} body=${raw.slice(0, 200)}`);
+  if (res.ok) return;
+  const raw = await res.text();
+  // Production can be stale/raced; resolve once and retry.
+  if (res.status === 404 && raw.toLowerCase().includes("production not found")) {
+    activeProductionID = "";
+    const freshID = await ensureProduction();
+    const retry = await openLiveSend(`/api/v1/productions/${encodeURIComponent(freshID)}/sources`, "POST", {
+      mixerInput,
+      sourceId: sourceID,
+    });
+    if (retry.ok) return;
+    const retryRaw = await retry.text();
+    throw new Error(`open live assign source retry status=${retry.status} body=${retryRaw.slice(0, 200)}`);
   }
+  throw new Error(`open live assign source status=${res.status} body=${raw.slice(0, 200)}`);
 }
 
 function sourceIDFromSelection(source: string): string {
