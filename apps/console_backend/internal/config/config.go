@@ -19,6 +19,7 @@ type Config struct {
 	ListenAddr   string
 	TelemetryMax int // max raw WS message size (bytes), default 255
 	NodeOfflineTTL time.Duration
+	CORSAllowedOrigins []string
 
 	CFAccessMode       string
 	CFAccessTeamDomain string
@@ -117,6 +118,7 @@ func Load() (*Config, error) {
 		ListenAddr:         listen,
 		TelemetryMax:       maxPayload,
 		NodeOfflineTTL:     time.Duration(offlineTTL) * time.Second,
+		CORSAllowedOrigins: splitCSVRaw(getenvDefault("VBS_CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
 		CFAccessMode:       accessMode,
 		CFAccessTeamDomain: teamDomain,
 		CFAccessAUD:        aud,

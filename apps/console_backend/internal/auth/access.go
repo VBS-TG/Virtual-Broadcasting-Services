@@ -256,6 +256,14 @@ func (v *AccessJWTVerifier) verifyConsoleToken(raw string) (*AccessClaims, error
 }
 
 func (v *AccessJWTVerifier) MintGuestToken(subject, scope string, ttl time.Duration, sessionVersion int) (string, error) {
+	return v.mintRoleToken(subject, "operator", scope, ttl, sessionVersion)
+}
+
+func (v *AccessJWTVerifier) MintAdminToken(subject string, ttl time.Duration) (string, error) {
+	return v.mintRoleToken(subject, "admin", "control:admin telemetry:read", ttl, 0)
+}
+
+func (v *AccessJWTVerifier) mintRoleToken(subject, role, scope string, ttl time.Duration, sessionVersion int) (string, error) {
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
@@ -263,9 +271,13 @@ func (v *AccessJWTVerifier) MintGuestToken(subject, scope string, ttl time.Durat
 	if subject == "" {
 		return "", fmt.Errorf("subject required")
 	}
+	role = strings.TrimSpace(strings.ToLower(role))
+	if role == "" {
+		return "", fmt.Errorf("role required")
+	}
 	now := time.Now().UTC()
 	claims := accessJWTClaims{
-		Role:  "operator",
+		Role:  role,
 		Scope: strings.TrimSpace(scope),
 		SessionVersion: sessionVersion,
 		RegisteredClaims: jwt.RegisteredClaims{

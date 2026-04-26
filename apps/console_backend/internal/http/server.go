@@ -119,14 +119,45 @@ func New(cfg *config.Config) *Server {
 	go s.fanoutStatusEvents()
 	s.http = &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           s.mux,
+		Handler:           s.withCORS(s.mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return s
 }
 
+func (s *Server) withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin != "" && s.isAllowedOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Cf-Access-Jwt-Assertion")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Add("Vary", "Origin")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) isAllowedOrigin(origin string) bool {
+	if s == nil || s.cfg == nil {
+		return false
+	}
+	for _, allowed := range s.cfg.CORSAllowedOrigins {
+		if strings.EqualFold(strings.TrimSpace(allowed), origin) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("POST /api/v1/auth/admin/email-login", s.handleAdminEmailLogin)
 	s.mux.HandleFunc("GET /vbs/telemetry/ws", s.handleTelemetryWS)
 	s.mux.HandleFunc("GET /vbs/telemetry/events/ws", s.handleTelemetryEventsWS)
 	s.mux.HandleFunc("GET /api/v1/telemetry/latest", s.handleTelemetryLatest)
@@ -144,6 +175,48 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/runtime/config", s.handleRuntimeConfigGet)
 	s.mux.HandleFunc("PUT /api/v1/runtime/config", s.handleRuntimeConfigPut)
 	s.mux.HandleFunc("POST /api/v1/runtime/config/apply", s.handleRuntimeConfigApply)
+}
+
+func (s *Server) handleAdminEmailLogin(w http.ResponseWriter, r *http.Request) {
+	claims, err := s.access.VerifyRequest(r)
+	if err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if !auth.IsAdminRole(claims.Role) {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxTokenBodyBytes)).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+	email := strings.TrimSpace(strings.ToLower(body.Email))
+	if email == "" {
+		http.Error(w, `{"error":"email required"}`, http.StatusBadRequest)
+		return
+	}
+	if claims.Email == "" || !strings.EqualFold(strings.TrimSpace(claims.Email), email) {
+		http.Error(w, `{"error":"email mismatch with access identity"}`, http.StatusForbidden)
+		return
+	}
+	ttl := 8 * time.Hour
+	token, err := s.access.MintAdminToken("admin:"+email, ttl)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"mint admin token failed: %s"}`, trimErr(err)), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"access_token": token,
+		"token_type": "Bearer",
+		"expires_at": time.Now().UTC().Add(ttl).Unix(),
+		"role": "admin",
+		"email": email,
+	})
 }
 
 // ListenAndServe starts the HTTP server.
