@@ -1,0 +1,37 @@
+services:
+  # 1. 媒體執行引擎 (Strom)
+  vbs-strom:
+    image: eyevinntechnology/strom:latest
+    container_name: vbs-strom
+    restart: always
+    network_mode: host
+    volumes:
+      - ./data/strom:/data
+
+  # 2. 持久化資料庫 (CouchDB)
+  vbs-couchdb:
+    image: couchdb:3
+    container_name: vbs-couchdb
+    restart: always
+    network_mode: host
+    environment:
+      - COUCHDB_USER=${VBS_DB_USER}
+      - COUCHDB_PASSWORD=${VBS_DB_PASSWORD}
+    volumes:
+      - ./data/couchdb:/opt/couchdb/data
+
+  # 3. 中央管理 API (Open Live)
+  vbs-open-live:
+    image: vbs-open-live:local
+    container_name: vbs-open-live
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-couchdb
+      - vbs-strom
+    environment:
+      - PORT=18080
+      - COUCHDB_URL=http://${VBS_DB_USER}:${VBS_DB_PASSWORD}@127.0.0.1:5984
+      - COUCHDB_NAME=open-live
+      - STROM_URL=http://127.0.0.1:8080
+      - LOG_LEVEL=info
