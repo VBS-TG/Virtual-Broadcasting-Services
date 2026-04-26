@@ -30,6 +30,8 @@ interface OpenLiveProduction {
   name?: string;
 }
 
+type OpenLiveListResponse<T> = T[] | { items?: T[]; data?: T[]; results?: T[] };
+
 const controlHost = env("VBS_ENGINE_CONTROL_BIND_HOST", "0.0.0.0");
 const controlPort = intEnv("VBS_ENGINE_CONTROL_BIND_PORT", 5000);
 const openLiveBaseURL = requiredEnv("VBS_EYEVINN_OPENLIVE_BASE_URL");
@@ -132,6 +134,22 @@ async function openLiveJSON<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+function asArray<T>(payload: OpenLiveListResponse<T>): T[] {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.results)) return payload.results;
+  return [];
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
 async function openLiveSend(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<Response> {
   return openLiveRequest(path, {
     method,
@@ -162,7 +180,8 @@ async function ensureProduction(): Promise<string> {
     activeProductionID = openLiveProductionID;
     return activeProductionID;
   }
-  const list = await openLiveJSON<OpenLiveProduction[]>("/api/v1/productions");
+  const listRaw = await openLiveJSON<OpenLiveListResponse<OpenLiveProduction>>("/api/v1/productions");
+  const list = asArray(listRaw);
   const found = list.find((p) => String(p.name ?? "") === openLiveProductionName);
   if (found?.id) {
     activeProductionID = found.id;
@@ -173,14 +192,15 @@ async function ensureProduction(): Promise<string> {
     const raw = await create.text();
     throw new Error(`open live create production status=${create.status} body=${raw.slice(0, 200)}`);
   }
-  const created = (await create.json()) as OpenLiveProduction;
-  activeProductionID = String(created.id ?? "");
+  const created = (await create.json()) as Record<string, unknown>;
+  activeProductionID = pickString(created, ["id", "_id", "productionId", "production_id", "uuid"]);
   if (!activeProductionID) throw new Error("open live create production missing id");
   return activeProductionID;
 }
 
 async function listOpenLiveSources(): Promise<OpenLiveSource[]> {
-  return openLiveJSON<OpenLiveSource[]>("/api/v1/sources");
+  const raw = await openLiveJSON<OpenLiveListResponse<OpenLiveSource>>("/api/v1/sources");
+  return asArray(raw);
 }
 
 async function ensureSource(index: number, address: string): Promise<string> {
@@ -560,7 +580,7 @@ const server = createServer(async (req, res) => {
       writeJson(res, 200, { config: runtimeConfig, state });
       return;
     }
-    if (req.method === "POST" && req.url === "/api/v1/runtime/config/apply") {
+    if ((req.method === "POST" && req.url === "/api/v1/runtime/config/apply") || (req.method === "PUT" && req.url === "/api/v1/runtime/config")) {
       if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
       const body = (await readBody(req)) as RuntimeConfig;
       const applied = await applyRuntimeConfig({
