@@ -17,6 +17,19 @@ interface RuntimeConfig {
   aux_sources?: Record<string, string>;
 }
 
+interface OpenLiveSource {
+  id: string;
+  name?: string;
+  streamType?: string;
+  stream_type?: string;
+  address?: string;
+}
+
+interface OpenLiveProduction {
+  id: string;
+  name?: string;
+}
+
 const controlHost = env("VBS_ENGINE_CONTROL_BIND_HOST", "0.0.0.0");
 const controlPort = intEnv("VBS_ENGINE_CONTROL_BIND_PORT", 5000);
 const openLiveBaseURL = requiredEnv("VBS_EYEVINN_OPENLIVE_BASE_URL");
@@ -24,6 +37,13 @@ const openLiveApplyPath = env("VBS_EYEVINN_OPENLIVE_APPLY_PATH", "/api/v1/runtim
 const openLiveStatePath = env("VBS_EYEVINN_OPENLIVE_STATE_PATH", "/api/v1/switch/state");
 const openLiveHealthPath = env("VBS_EYEVINN_OPENLIVE_HEALTH_PATH", "/healthz");
 const openLiveAuthToken = env("VBS_EYEVINN_OPENLIVE_AUTH_TOKEN", "");
+const openLiveReadyPath = env("VBS_EYEVINN_OPENLIVE_READY_PATH", "/ready");
+const openLiveProductionID = env("VBS_EYEVINN_OPENLIVE_PRODUCTION_ID", "");
+const openLiveProductionName = env("VBS_EYEVINN_OPENLIVE_PRODUCTION_NAME", "vbs-main");
+const openLiveProgramInput = env("VBS_EYEVINN_OPENLIVE_PROGRAM_INPUT", "program");
+const openLivePreviewInput = env("VBS_EYEVINN_OPENLIVE_PREVIEW_INPUT", "preview");
+const openLiveAuxInputPrefix = env("VBS_EYEVINN_OPENLIVE_AUX_INPUT_PREFIX", "aux");
+const openLiveAutoActivate = env("VBS_EYEVINN_OPENLIVE_AUTO_ACTIVATE", "1") !== "0";
 
 const consoleBase = env("VBS_CONSOLE_BASE_URL", "");
 const telemetryEnabled = env("VBS_ENGINE_TELEMETRY_ENABLED", "1") !== "0" && consoleBase !== "";
@@ -64,6 +84,7 @@ let runtimeConfig: RuntimeConfig = {
   pgm_count: 1,
   aux_count: 4,
 };
+let activeProductionID = "";
 
 function env(name: string, defaultValue: string): string {
   return (process.env[name] ?? defaultValue).trim();
@@ -88,6 +109,138 @@ function joinURL(base: string, path: string): string {
   const b = base.replace(/\/+$/, "");
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${b}${p}`;
+}
+
+function openLiveHeaders(json: boolean): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (json) headers["Content-Type"] = "application/json";
+  if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
+  return headers;
+}
+
+async function openLiveRequest(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = {
+    ...openLiveHeaders(false),
+    ...(init.headers as Record<string, string> | undefined),
+  };
+  return fetch(joinURL(openLiveBaseURL, path), { ...init, headers });
+}
+
+async function openLiveJSON<T>(path: string): Promise<T> {
+  const res = await openLiveRequest(path, { method: "GET" });
+  if (!res.ok) throw new Error(`open live get ${path} status=${res.status}`);
+  return (await res.json()) as T;
+}
+
+async function openLiveSend(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<Response> {
+  return openLiveRequest(path, {
+    method,
+    headers: openLiveHeaders(true),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+function inputKey(index: number): string {
+  return `input${index}`;
+}
+
+function sourceIDForInput(index: number): string {
+  return `vbs-${inputKey(index)}`;
+}
+
+function sourceNameForInput(index: number): string {
+  return `VBS ${inputKey(index)}`;
+}
+
+function mixerInputForAux(channel: string): string {
+  return `${openLiveAuxInputPrefix}${channel}`;
+}
+
+async function ensureProduction(): Promise<string> {
+  if (activeProductionID) return activeProductionID;
+  if (openLiveProductionID) {
+    activeProductionID = openLiveProductionID;
+    return activeProductionID;
+  }
+  const list = await openLiveJSON<OpenLiveProduction[]>("/api/v1/productions");
+  const found = list.find((p) => String(p.name ?? "") === openLiveProductionName);
+  if (found?.id) {
+    activeProductionID = found.id;
+    return activeProductionID;
+  }
+  const create = await openLiveSend("/api/v1/productions", "POST", { name: openLiveProductionName });
+  if (!create.ok) {
+    const raw = await create.text();
+    throw new Error(`open live create production status=${create.status} body=${raw.slice(0, 200)}`);
+  }
+  const created = (await create.json()) as OpenLiveProduction;
+  activeProductionID = String(created.id ?? "");
+  if (!activeProductionID) throw new Error("open live create production missing id");
+  return activeProductionID;
+}
+
+async function listOpenLiveSources(): Promise<OpenLiveSource[]> {
+  return openLiveJSON<OpenLiveSource[]>("/api/v1/sources");
+}
+
+async function ensureSource(index: number, address: string): Promise<string> {
+  const id = sourceIDForInput(index);
+  const all = await listOpenLiveSources();
+  const found = all.find((s) => String(s.id) === id);
+  const payload = {
+    id,
+    name: sourceNameForInput(index),
+    streamType: "srt",
+    address,
+  };
+  if (!found) {
+    const create = await openLiveSend("/api/v1/sources", "POST", payload);
+    if (!create.ok) {
+      const raw = await create.text();
+      throw new Error(`open live create source status=${create.status} body=${raw.slice(0, 200)}`);
+    }
+    return id;
+  }
+  const currentAddress = String(found.address ?? "");
+  const currentType = String(found.streamType ?? found.stream_type ?? "").toLowerCase();
+  if (currentAddress === address && (currentType === "srt" || currentType === "")) return id;
+  const patch = await openLiveSend(`/api/v1/sources/${encodeURIComponent(id)}`, "PATCH", {
+    address,
+    streamType: "srt",
+  });
+  if (!patch.ok) {
+    const raw = await patch.text();
+    throw new Error(`open live patch source status=${patch.status} body=${raw.slice(0, 200)}`);
+  }
+  return id;
+}
+
+async function assignProductionInput(productionID: string, mixerInput: string, sourceID: string): Promise<void> {
+  const res = await openLiveSend(`/api/v1/productions/${encodeURIComponent(productionID)}/sources`, "POST", {
+    mixerInput,
+    sourceId: sourceID,
+  });
+  if (!res.ok) {
+    const raw = await res.text();
+    throw new Error(`open live assign source status=${res.status} body=${raw.slice(0, 200)}`);
+  }
+}
+
+function sourceIDFromSelection(source: string): string {
+  if (source.startsWith("input")) {
+    const n = Number(source.slice("input".length));
+    if (Number.isFinite(n) && n >= 1 && n <= 8) return sourceIDForInput(n);
+  }
+  throw new Error(`unsupported source selection: ${source}`);
+}
+
+async function activateProduction(productionID: string): Promise<void> {
+  if (!openLiveAutoActivate) return;
+  const res = await openLiveSend(`/api/v1/productions/${encodeURIComponent(productionID)}/activate`, "POST");
+  // 200/409 都視為可用（有些流程若已啟動會返回衝突）
+  if (res.ok || res.status === 409) return;
+  const raw = await res.text();
+  throw new Error(`open live activate production status=${res.status} body=${raw.slice(0, 200)}`);
 }
 
 async function authorized(req: IncomingMessage): Promise<boolean> {
@@ -216,9 +369,7 @@ function ensureSourceAllowed(source: string, cfg: RuntimeConfig): boolean {
 }
 
 async function fetchOpenLiveState(): Promise<RuntimeState> {
-  const headers: Record<string, string> = {};
-  if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
-  const res = await fetch(joinURL(openLiveBaseURL, openLiveStatePath), { method: "GET", headers });
+  const res = await openLiveRequest(openLiveStatePath, { method: "GET" });
   if (!res.ok) throw new Error(`open live state status=${res.status}`);
   return (await res.json()) as RuntimeState;
 }
@@ -252,16 +403,26 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
     }
   }
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
-  const res = await fetch(joinURL(openLiveBaseURL, openLiveApplyPath), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(next),
-  });
-  if (!res.ok) {
-    const raw = await res.text();
-    throw new Error(`open live apply status=${res.status} body=${raw.slice(0, 200)}`);
+  const productionID = await ensureProduction();
+  for (let i = 0; i < sourceList.length; i += 1) {
+    await ensureSource(i + 1, sourceList[i]);
+  }
+  await activateProduction(productionID);
+  // Apply selected buses to Open Live production mapping.
+  await assignProductionInput(productionID, openLiveProgramInput, sourceIDFromSelection(state.program || "input1"));
+  await assignProductionInput(productionID, openLivePreviewInput, sourceIDFromSelection(state.preview || "input2"));
+  for (const ch of ["1", "2", "3", "4"] as const) {
+    if (Number(ch) > next.aux_count) continue;
+    const selected = String(next.aux_sources?.[ch] ?? state.aux[ch] ?? `input${ch}`);
+    await assignProductionInput(productionID, mixerInputForAux(ch), sourceIDFromSelection(selected));
+  }
+  // Optional compatibility path if Open Live deployment exposes legacy endpoint.
+  if (openLiveApplyPath && openLiveApplyPath !== "/api/v1/runtime/config/apply") {
+    const compat = await openLiveSend(openLiveApplyPath, "POST", next);
+    if (!compat.ok) {
+      const raw = await compat.text();
+      throw new Error(`open live compat apply status=${compat.status} body=${raw.slice(0, 200)}`);
+    }
   }
 
   runtimeConfig = {
@@ -282,7 +443,7 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
       "4": String(remoteState.aux?.["4"] ?? ""),
     };
   } catch {
-    // Open Live state endpoint may be temporarily unavailable after apply.
+    // Open Live state endpoint may not exist on all deployments.
   }
   return runtimeConfig;
 }
@@ -363,10 +524,13 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/healthz") {
       let openLiveOK = false;
       try {
-        const headers: Record<string, string> = {};
-        if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
-        const r = await fetch(joinURL(openLiveBaseURL, openLiveHealthPath), { method: "GET", headers });
-        openLiveOK = r.ok;
+        const r = await openLiveRequest(openLiveHealthPath, { method: "GET" });
+        if (r.ok) {
+          openLiveOK = true;
+        } else {
+          const ready = await openLiveRequest(openLiveReadyPath, { method: "GET" });
+          openLiveOK = ready.ok;
+        }
       } catch {
         openLiveOK = false;
       }
@@ -414,17 +578,10 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const source = String(body.source ?? "").trim();
       if (!source) return writeJson(res, 400, { error: "source required" });
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
-      const forward = await fetch(joinURL(openLiveBaseURL, "/api/v1/switch/program"), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ source }),
-      });
-      const raw = await forward.text();
-      if (!forward.ok) return writeJson(res, forward.status, { error: raw || "open live switch program failed" });
+      const productionID = await ensureProduction();
+      await assignProductionInput(productionID, openLiveProgramInput, sourceIDFromSelection(source));
       state.program = source;
-      writeJson(res, 200, { applied: true, program: state.program, open_live_raw: raw });
+      writeJson(res, 200, { applied: true, program: state.program });
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/preview") {
@@ -432,17 +589,10 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const source = String(body.source ?? "").trim();
       if (!source) return writeJson(res, 400, { error: "source required" });
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
-      const forward = await fetch(joinURL(openLiveBaseURL, "/api/v1/switch/preview"), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ source }),
-      });
-      const raw = await forward.text();
-      if (!forward.ok) return writeJson(res, forward.status, { error: raw || "open live switch preview failed" });
+      const productionID = await ensureProduction();
+      await assignProductionInput(productionID, openLivePreviewInput, sourceIDFromSelection(source));
       state.preview = source;
-      writeJson(res, 200, { applied: true, preview: state.preview, open_live_raw: raw });
+      writeJson(res, 200, { applied: true, preview: state.preview });
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/aux") {
@@ -452,17 +602,10 @@ const server = createServer(async (req, res) => {
       const source = String(body.source ?? "").trim();
       if (!["1", "2", "3", "4"].includes(channel)) return writeJson(res, 400, { error: "channel must be 1..4" });
       if (!source) return writeJson(res, 400, { error: "source required" });
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (openLiveAuthToken) headers.Authorization = `Bearer ${openLiveAuthToken}`;
-      const forward = await fetch(joinURL(openLiveBaseURL, "/api/v1/switch/aux"), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ channel, source }),
-      });
-      const raw = await forward.text();
-      if (!forward.ok) return writeJson(res, forward.status, { error: raw || "open live switch aux failed" });
+      const productionID = await ensureProduction();
+      await assignProductionInput(productionID, mixerInputForAux(channel), sourceIDFromSelection(source));
       state.aux[channel as "1" | "2" | "3" | "4"] = source;
-      writeJson(res, 200, { applied: true, channel, source, open_live_raw: raw });
+      writeJson(res, 200, { applied: true, channel, source });
       return;
     }
     writeJson(res, 404, { error: "not found" });
