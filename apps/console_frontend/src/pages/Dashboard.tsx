@@ -2,44 +2,46 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useRuntimeStore } from '../stores/runtimeStore'
 import { useSwitcherStore } from '../stores/switcherStore'
+import { useTelemetryStore } from '../stores/telemetryStore'
 import Multiviewer from '../components/Multiviewer'
 import Switcher from '../components/Switcher'
 import TelemetryPanel from '../components/TelemetryPanel'
 
-// [MOCK] 節點狀態目前固定為 ONLINE
-// TODO: 後端就緒後從 /healthz 或 telemetry 取得真實狀態
-const MOCK_NODES = [
-  { id: 'console', label: 'CONSOLE', status: 'ONLINE' as const, color: 'text-vbs-pvw', dot: 'bg-vbs-pvw' },
-  { id: 'route',   label: 'ROUTE',   status: 'ONLINE' as const, color: 'text-vbs-pvw', dot: 'bg-vbs-pvw' },
-  { id: 'engine',  label: 'ENGINE',  status: 'ONLINE' as const, color: 'text-vbs-pvw', dot: 'bg-vbs-pvw' },
-]
-
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { config, fetch: fetchRuntime } = useRuntimeStore()
+  const { config, fetch: fetchRuntime, lastApplyResult } = useRuntimeStore()
   const { state: switchState, fetchState } = useSwitcherStore()
+  const telemetry = useTelemetryStore((s) => s.data)
+  const fetchTelemetry = useTelemetryStore((s) => s.fetch)
 
   useEffect(() => {
     fetchRuntime()
     fetchState()
-  }, [fetchRuntime, fetchState])
+    fetchTelemetry()
+  }, [fetchRuntime, fetchState, fetchTelemetry])
+
+  const nodeCards = [
+    { id: 'console', label: 'CONSOLE', online: Boolean(config) },
+    { id: 'route', label: 'ROUTE', online: Boolean(telemetry?.route?.online) },
+    { id: 'engine', label: 'ENGINE', online: Boolean(telemetry?.engine?.online) },
+  ]
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="p-3 md:p-4 flex flex-col gap-3">
 
         {/* ── 狀態條 ── */}
-        <StatusStrip />
+        <StatusStrip nodes={nodeCards} />
 
         {/* ── Node Status Cards ── */}
         <div className="grid grid-cols-3 gap-3">
-          {MOCK_NODES.map((n) => (
+          {nodeCards.map((n) => (
             <div key={n.id} className="glass rounded-xl p-3 flex flex-col gap-1.5">
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full animate-pulse-slow shrink-0 ${n.dot}`} />
+                <span className={`w-2 h-2 rounded-full animate-pulse-slow shrink-0 ${n.online ? 'bg-vbs-pvw' : 'bg-vbs-pgm'}`} />
                 <span className="text-[15px] font-black text-vbs-muted tracking-widest">{n.label}</span>
               </div>
-              <span className={`text-[17px] font-black ${n.color}`}>{n.status}</span>
+              <span className={`text-[17px] font-black ${n.online ? 'text-vbs-pvw' : 'text-vbs-pgm'}`}>{n.online ? 'ONLINE' : 'OFFLINE'}</span>
             </div>
           ))}
         </div>
@@ -73,6 +75,38 @@ export default function Dashboard() {
             </div>
           ) : (
             <p className="text-[15px] text-vbs-muted">載入中…</p>
+          )}
+        </div>
+
+        {/* ── Last Apply Summary Card ── */}
+        <div className="glass rounded-xl p-4 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[15px] font-black text-vbs-muted uppercase tracking-widest">Last Apply Result</span>
+          </div>
+          {lastApplyResult ? (() => {
+            const r = lastApplyResult
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-1">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[14px] text-vbs-muted">Time</span>
+                  <span className="text-[15px] font-bold text-vbs-text">{new Date(r.timestamp).toLocaleTimeString()}</span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[14px] text-vbs-muted">Route</span>
+                  <span className={`text-[15px] font-bold ${r.route ? 'text-vbs-pvw' : 'text-vbs-pgm'}`}>{r.route ? 'OK' : 'FAIL'}</span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[14px] text-vbs-muted">Engine</span>
+                  <span className={`text-[15px] font-bold ${r.engine ? 'text-vbs-pvw' : 'text-vbs-pgm'}`}>{r.engine ? 'OK' : 'FAIL'}</span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[14px] text-vbs-muted">Rollback</span>
+                  <span className={`text-[15px] font-bold ${r.rolled_back ? 'text-vbs-warning' : 'text-vbs-muted'}`}>{r.rolled_back ? 'YES' : 'NO'}</span>
+                </div>
+              </div>
+            )
+          })() : (
+            <p className="text-[15px] text-vbs-muted mt-1">尚未 Apply</p>
           )}
         </div>
 
@@ -114,7 +148,7 @@ export default function Dashboard() {
   )
 }
 
-function StatusStrip() {
+function StatusStrip({ nodes }: { nodes: Array<{ id: string; label: string; online: boolean }> }) {
   const [time, setTime] = useState(new Date())
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000)
@@ -124,11 +158,11 @@ function StatusStrip() {
   return (
     <div className="glass rounded-xl px-3 md:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-3 md:gap-5">
-        {MOCK_NODES.map((n) => (
+        {nodes.map((n) => (
           <div key={n.id} className="flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full animate-pulse-slow shrink-0 ${n.dot}`} />
+            <span className={`w-1.5 h-1.5 rounded-full animate-pulse-slow shrink-0 ${n.online ? 'bg-vbs-pvw' : 'bg-vbs-pgm'}`} />
             <span className="text-[15px] font-semibold text-vbs-muted hidden sm:inline">{n.label}</span>
-            <span className={`text-[15px] font-black ${n.color}`}>{n.status}</span>
+            <span className={`text-[15px] font-black ${n.online ? 'text-vbs-pvw' : 'text-vbs-pgm'}`}>{n.online ? 'ONLINE' : 'OFFLINE'}</span>
           </div>
         ))}
       </div>

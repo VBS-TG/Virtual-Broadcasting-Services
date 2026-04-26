@@ -27,7 +27,7 @@ export default function SystemHealth() {
     setChecking(true)
     const targets = [
       { label: 'Console API (/healthz)', url: `${settings.apiBaseUrl}/healthz` },
-      { label: 'Engine Switcher Domain', url: settings.apiBaseUrl },
+      { label: 'Engine Switcher', url: `${settings.engineBaseUrl}/healthz` },
     ]
     const checks = await Promise.all(
       targets.map(async (t) => {
@@ -65,7 +65,8 @@ export default function SystemHealth() {
       {/* 說明 */}
       <div className="glass rounded-xl p-4 flex flex-col gap-1.5">
         <p className="text-[15px] font-semibold text-vbs-muted">目標端點</p>
-        <p className="text-[15px] font-mono text-vbs-text">{settings.apiBaseUrl}/healthz</p>
+        <p className="text-[15px] font-mono text-vbs-text break-all">{settings.apiBaseUrl}/healthz</p>
+        <p className="text-[15px] font-mono text-vbs-text break-all">{settings.engineBaseUrl}/healthz</p>
         <p className="text-[15px] text-vbs-muted mt-1">
           點擊「執行健康檢查」後，系統將對以上端點發送 GET 請求並記錄 HTTP 狀態碼與延遲。
         </p>

@@ -13,6 +13,7 @@ import Telemetry from './pages/Telemetry'
 import SystemHealth from './pages/SystemHealth'
 import OperationLog from './pages/OperationLog'
 import Settings from './pages/Settings'
+import ToastContainer from './components/ToastContainer'
 import './index.css'
 import './App.css'
 
@@ -55,6 +56,7 @@ function AppLayout() {
 export default function App() {
   return (
     <BrowserRouter>
+      <ToastContainer />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/popout/switcher" element={<RequireAuth><PopoutSwitcher /></RequireAuth>} />
