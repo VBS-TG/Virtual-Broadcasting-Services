@@ -38,7 +38,7 @@ export default function LoginPage() {
       setError(verified.error ?? '管理員 JWT 驗證失敗')
       return
     }
-    login(verified.token, 'admin')
+    login(verified.token, 'admin', email)
     navigate('/dashboard', { replace: true })
   }
 

@@ -5,7 +5,7 @@ import { parseJwt } from '../lib/jwt'
 
 interface AuthState {
   user: AuthUser | null
-  login: (token: string, role?: UserRole) => void
+  login: (token: string, role?: UserRole, email?: string) => void
   loginAdminByEmail: (email: string) => void
   logout: () => void
   isLoggedIn: () => boolean
@@ -16,15 +16,24 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
 
-      login: (token: string, role?: UserRole) => {
+      login: (token: string, role?: UserRole, email?: string) => {
         const payload = parseJwt(token)
         const tokenRole = role || (payload?.role as UserRole) || 'operator'
+        const normalizedEmail = (email || String(payload?.email ?? '')).trim().toLowerCase() || undefined
         
         const tokenPreview =
           token.length > 10
             ? `${token.slice(0, 6)}...${token.slice(-4)}`
             : `${token.slice(0, 6)}...`
-        set({ user: { token, role: tokenRole, tokenPreview, expiresAt: payload?.exp ? payload.exp * 1000 : null } })
+        set({
+          user: {
+            token,
+            role: tokenRole,
+            tokenPreview,
+            expiresAt: payload?.exp ? payload.exp * 1000 : null,
+            email: normalizedEmail,
+          },
+        })
       },
 
       loginAdminByEmail: (email: string) => {

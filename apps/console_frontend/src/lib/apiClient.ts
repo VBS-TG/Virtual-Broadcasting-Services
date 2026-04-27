@@ -43,6 +43,8 @@ interface PresenceRecord {
   online?: boolean
 }
 
+let adminRefreshInFlight: Promise<boolean> | null = null
+
 function resolveApiBase(rawBase: string): string {
   const trimmed = rawBase.trim()
   if (!trimmed) return 'https://vbsapi.cyblisswisdom.org'
@@ -57,30 +59,30 @@ export async function request<T>(
 ): Promise<ApiResponse<T>> {
   const settings = useSettingsStore.getState().settings
   const apiBase = resolveApiBase(settings.apiBaseUrl)
-  const token = useAuthStore.getState().user?.token ?? ''
   const start = performance.now()
 
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), settings.apiTimeoutMs)
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
-    if (token) headers.Authorization = `Bearer ${token}`
-    const res = await fetch(`${apiBase}${path}`, {
-      method,
-      signal: controller.signal,
-      credentials: 'include',
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    clearTimeout(timeoutId)
+    const first = await performFetch(method, `${apiBase}${path}`, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
     const latencyMs = Math.round(performance.now() - start)
-    const data = await res.json().catch(() => null)
-    if (!res.ok) {
-      return { error: data?.error ?? data?.message ?? `HTTP ${res.status}`, statusCode: res.status, latencyMs }
+    if (first.status === 401) {
+      const refreshed = await tryRefreshAdminToken(apiBase, settings.apiTimeoutMs)
+      if (refreshed) {
+        const second = await performFetch(method, `${apiBase}${path}`, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
+        if (!second.ok) {
+          return {
+            error: second.data?.error ?? second.data?.message ?? `HTTP ${second.status}`,
+            statusCode: second.status,
+            latencyMs,
+          }
+        }
+        return { data: second.data, statusCode: second.status, latencyMs }
+      }
+      return { error: first.data?.error ?? 'unauthorized', statusCode: 401, latencyMs }
     }
-    return { data, statusCode: res.status, latencyMs }
+    if (!first.ok) {
+      return { error: first.data?.error ?? first.data?.message ?? `HTTP ${first.status}`, statusCode: first.status, latencyMs }
+    }
+    return { data: first.data, statusCode: first.status, latencyMs }
   } catch (err) {
     const latencyMs = Math.round(performance.now() - start)
     if ((err as Error).name === 'AbortError') {
@@ -88,6 +90,71 @@ export async function request<T>(
     }
     return { error: (err as Error).message, latencyMs }
   }
+}
+
+async function performFetch(
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  url: string,
+  body: unknown,
+  timeoutMs: number,
+  token: string
+): Promise<{ ok: boolean; status: number; data: any }> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (token) headers.Authorization = `Bearer ${token}`
+    const res = await fetch(url, {
+      method,
+      signal: controller.signal,
+      credentials: 'include',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    const data = await res.json().catch(() => null)
+    return { ok: res.ok, status: res.status, data }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+async function tryRefreshAdminToken(apiBase: string, timeoutMs: number): Promise<boolean> {
+  if (adminRefreshInFlight) return adminRefreshInFlight
+  adminRefreshInFlight = (async () => {
+    const user = useAuthStore.getState().user
+    if (!user || user.role !== 'admin' || !user.email) {
+      useAuthStore.getState().logout()
+      return false
+    }
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetch(`${apiBase}/api/v1/auth/admin/email-login`, {
+        method: 'POST',
+        signal: controller.signal,
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email }),
+      })
+      const data = await res.json().catch(() => null)
+      const token = String(data?.access_token ?? '')
+      if (!res.ok || !token) {
+        useAuthStore.getState().logout()
+        return false
+      }
+      useAuthStore.getState().login(token, 'admin', user.email)
+      return true
+    } catch {
+      useAuthStore.getState().logout()
+      return false
+    } finally {
+      clearTimeout(timeoutId)
+      adminRefreshInFlight = null
+    }
+  })()
+  return adminRefreshInFlight
 }
 
 function inputNumberToSource(input: number): string {
