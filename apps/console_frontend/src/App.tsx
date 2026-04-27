@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
-import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import BottomNav from './components/BottomNav'
 import LoginPage from './pages/LoginPage'
@@ -43,8 +42,8 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
 
 function AppLayout() {
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden">
-      <Header />
+    <div className="flex flex-col h-full w-full overflow-hidden bg-gradient-to-b from-[#070B1E] to-[#003D3A]">
+      
       <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Sidebar：lg 以上顯示 */}
         <div className="hidden lg:flex">

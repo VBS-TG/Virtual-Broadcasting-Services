@@ -1,24 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useRuntimeStore } from '../stores/runtimeStore'
-import { useSwitcherStore } from '../stores/switcherStore'
 import { useTelemetryStore } from '../stores/telemetryStore'
-import Multiviewer from '../components/Multiviewer'
-import Switcher from '../components/Switcher'
 import TelemetryPanel from '../components/TelemetryPanel'
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const { config, fetch: fetchRuntime, lastApplyResult } = useRuntimeStore()
-  const { state: switchState, fetchState } = useSwitcherStore()
   const telemetry = useTelemetryStore((s) => s.data)
   const fetchTelemetry = useTelemetryStore((s) => s.fetch)
 
   useEffect(() => {
     fetchRuntime()
-    fetchState()
     fetchTelemetry()
-  }, [fetchRuntime, fetchState, fetchTelemetry])
+  }, [fetchRuntime, fetchTelemetry])
 
   const nodeCards = [
     { id: 'console', label: 'CONSOLE', online: Boolean(config) },
@@ -33,7 +28,7 @@ export default function Dashboard() {
         
         {/* ── 狀態條 (跨全寬) ── */}
         <div className="md:col-span-12">
-          <StatusStrip nodes={nodeCards} />
+          <StatusStrip />
         </div>
 
         {/* ── Node Status Cards (左側 8 格，分三塊) ── */}
@@ -123,18 +118,8 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* ── 主內容：Multiviewer + Switcher ── */}
-        <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-12 gap-5 mt-2">
-          <div className="md:col-span-8 glass rounded-3xl p-4 shadow-xl">
-            <Multiviewer pgm={switchState.program} pvw={switchState.preview} compact />
-          </div>
-          <div className="md:col-span-4 glass rounded-3xl p-4 shadow-xl">
-            <Switcher compact />
-          </div>
-        </div>
-
         {/* ── Telemetry 摘要 ── */}
-        <div className="md:col-span-12 glass rounded-3xl shadow-xl overflow-hidden mt-2">
+        <div className="md:col-span-12 mt-2">
           <TelemetryPanel compact />
         </div>
 
@@ -143,7 +128,7 @@ export default function Dashboard() {
   )
 }
 
-function StatusStrip({ nodes }: { nodes: Array<{ id: string; label: string; online: boolean }> }) {
+function StatusStrip() {
   const [time, setTime] = useState(new Date())
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000)
@@ -151,21 +136,29 @@ function StatusStrip({ nodes }: { nodes: Array<{ id: string; label: string; onli
   }, [])
 
   return (
-    <div className="glass rounded-2xl px-4 py-3 flex items-center justify-between shadow-lg">
-      <div className="flex items-center gap-6">
-        {nodes.map((n) => (
-          <div key={n.id} className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${n.online ? 'bg-vbs-pvw shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-vbs-pgm shadow-[0_0_8px_rgba(255,59,59,0.8)]'}`} />
-            <span className="text-[11px] font-bold text-vbs-muted hidden sm:inline">{n.label}</span>
-          </div>
-        ))}
+    <div className="flex flex-col md:flex-row md:items-end justify-between mb-4 px-1 gap-4">
+      
+      {/* ── 左側：Logo 與全名 ── */}
+      <div className="flex items-center gap-4">
+        {/* 系統名稱與副標題 */}
+        <div className="flex flex-col">
+          <h1 className="text-xl md:text-2xl lg:text-3xl font-black text-white tracking-tight drop-shadow-md mb-0.5 md:mb-1 leading-none">
+            Virtual Broadcasting Services
+          </h1>
+          <span className="text-[20px] md:text-xl font-bold text-vbs-muted tracking-[0.1em] uppercase leading-none">
+            Console Dashboard
+          </span>
+        </div>
       </div>
-      <div className="flex items-baseline gap-2">
-        <span className="text-[11px] font-bold text-vbs-muted uppercase tracking-wider hidden md:inline">SRT AES-256</span>
-        <span className="text-xl font-black text-white tracking-tight drop-shadow-md">
+
+      {/* ── 右側：獨立的時間顯示 ── */}
+      <div className="flex items-baseline gap-3">
+        {/* tabular-nums 可以讓數字寬度固定，秒數跳動時才不會造成排版左右抖動 */}
+        <span className="text-5xl md:text-7xl font-black text-white tracking-tighter drop-shadow-lg tabular-nums">
           {time.toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })}
         </span>
       </div>
+      
     </div>
   )
 }
