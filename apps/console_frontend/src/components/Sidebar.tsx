@@ -2,16 +2,17 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import logoTxtImg from '../assets/images/vbslogo-txtimg.svg'
 
-import { LayoutDashboard, Settings2, MonitorPlay, Activity, ShieldAlert, FileText, Settings, Lock } from 'lucide-react'
+import { LayoutDashboard, Settings2, MonitorPlay, Activity, ShieldAlert, FileText, Settings, Lock, KeyRound } from 'lucide-react'
 
 const NAV_ITEMS = [
   { path: '/dashboard',   label: 'Dashboard',  icon: LayoutDashboard, desc: '總覽'   },
   { path: '/switcher',    label: 'Switcher',   icon: MonitorPlay,     desc: '導播'   },
-  { path: '/runtime',     label: 'Runtime',    icon: Settings2,       desc: '配置'   },
+  { path: '/runtime',     label: 'Runtime',    icon: Settings2,       desc: '配置',  adminOnly: true },
+  { path: '/rental-sessions', label: 'Rentals', icon: KeyRound,       desc: '租賃',  adminOnly: true },
   { path: '/telemetry',   label: 'Telemetry',  icon: Activity,        desc: '遙測'   },
   { path: '/system',      label: 'System',     icon: ShieldAlert,     desc: '健康'   },
   { path: '/logs',        label: 'Logs',       icon: FileText,        desc: '日誌'   },
-  { path: '/settings',    label: 'Settings',   icon: Settings,        desc: '設定'   },
+  { path: '/settings',    label: 'Settings',   icon: Settings,        desc: '設定',  adminOnly: true },
 ]
 
 export default function Sidebar() {
@@ -35,7 +36,7 @@ export default function Sidebar() {
 
       {NAV_ITEMS.map((item) => {
         const isActive = location.pathname === item.path
-        const isReadOnly = !isAdmin && (item.path === '/runtime' || item.path === '/settings')
+        const isReadOnly = !isAdmin && item.adminOnly
         return (
           <button
             key={item.path}
@@ -44,29 +45,29 @@ export default function Sidebar() {
             title={item.label}
             className={`
               group relative w-11 h-11 rounded-xl flex flex-col items-center justify-center gap-0.5
-              transition-all duration-200
+              transition-all duration-200 overflow-hidden
               ${isActive
-                ? 'glass border border-vbs-cyan/40 text-vbs-cyan shadow-[0_0_12px_rgba(34,211,238,0.3)]'
-                : 'text-vbs-muted hover:text-vbs-text hover:glass hover:border hover:border-white/10'}
+                ? 'bg-gradient-to-r from-vbs-accent/20 to-transparent text-white shadow-[inset_0_0_12px_rgba(30,144,255,0.1)]'
+                : 'text-vbs-muted hover:text-vbs-text hover:bg-white/5'}
             `}
           >
-            <item.icon className="w-5 h-5 mb-0.5" />
-            <span className="text-[12px] font-mono leading-none opacity-70">{item.desc}</span>
+            {/* Active bar 指示條 (參考圖中的左側高亮線條) */}
+            {isActive && (
+              <span className="absolute left-0 top-0 bottom-0 w-1 bg-vbs-accent rounded-r-full shadow-[0_0_8px_rgba(30,144,255,0.8)]" />
+            )}
+
+            <item.icon className={`w-5 h-5 mb-0.5 ${isActive ? 'drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]' : ''}`} />
+            <span className={`text-[12px] font-mono leading-none ${isActive ? 'opacity-100' : 'opacity-70'}`}>{item.desc}</span>
 
             {isReadOnly && <Lock className="w-3 h-3 absolute top-1 right-1 opacity-50" />}
 
             {/* Tooltip */}
-            <span className="absolute left-full ml-2 px-2 py-1 glass rounded-md text-[15px] font-medium text-vbs-text
+            <span className="absolute left-full ml-2 px-3 py-1.5 glass-dark rounded-lg text-[14px] font-medium text-vbs-text
               whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100
-              transition-opacity duration-150 z-50 flex items-center gap-1">
+              transition-opacity duration-150 z-50 flex items-center gap-1 shadow-xl">
               {item.label}
               {isReadOnly && <span className="text-vbs-muted text-[12px] ml-1">(唯讀)</span>}
             </span>
-
-            {/* Active bar */}
-            {isActive && (
-              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-vbs-cyan rounded-r-full" />
-            )}
           </button>
         )
       })}

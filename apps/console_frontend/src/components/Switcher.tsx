@@ -44,27 +44,26 @@ function BusRow({ label, activeId, bus, fullScreen, inputs, onSelect }: {
   onSelect: (id: number) => void
 }) {
   return (
-    <div className="flex flex-col gap-2">
-      <span className={`text-[14px] font-black tracking-widest ${bus === 'pgm' ? 'text-vbs-pgm' : 'text-vbs-pvw'}`}>
-        {label}
+    <div className="flex flex-col gap-2 w-full">
+      <span className={`text-[11px] font-bold uppercase tracking-widest ${bus === 'pgm' ? 'text-vbs-pgm' : 'text-vbs-pvw'}`}>
+        {label} BUS
       </span>
-      <div className={`grid grid-cols-4 gap-2 sm:gap-3 ${fullScreen ? 'flex-1' : ''}`}>
+      <div className={`grid grid-cols-4 sm:grid-cols-8 xl:grid-cols-4 gap-2 w-full ${fullScreen ? 'flex-1' : ''}`}>
         {inputs.map((inp) => {
           const isActive = activeId === inp.id
           return (
             <button key={inp.id} id={`${bus}-btn-${inp.id}`}
               onClick={() => onSelect(inp.id)}
               className={`
-                w-14 h-14 sm:w-16 sm:h-16 xl:w-20 xl:h-20 shrink-0 mx-auto rounded-xl font-bold text-[14px] xl:text-[18px] border
-                transition-all duration-100 active:scale-95 flex items-center justify-center
+                aspect-square w-full rounded-2xl font-black text-[13px] md:text-[15px] xl:text-[18px]
+                transition-all duration-200 active:scale-95 flex items-center justify-center shadow-lg border
                 ${isActive
                   ? bus === 'pgm'
-                    ? 'pgm-active text-vbs-pgm shadow-pgm scale-105'
-                    : 'pvw-active text-vbs-pvw shadow-pvw scale-105'
-                  : `glass-dark border-white/8 text-vbs-muted hover:text-vbs-text
-                     ${bus === 'pgm' ? 'hover:border-vbs-pgm/30' : 'hover:border-vbs-pvw/30'}`}
+                    ? 'pgm-active text-white shadow-[0_0_15px_rgba(255,59,59,0.4)] scale-105 border-vbs-pgm/60'
+                    : 'pvw-active text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 border-vbs-pvw/60'
+                  : `glass-dark border-white/5 text-vbs-muted hover:text-white hover:bg-white/5`}
               `}
-            >{inp.label}</button>
+            >{inp.id}</button>
           )
         })}
       </div>
@@ -96,25 +95,27 @@ function TBar({ position, onDrag }: { position: number; onDrag: (v: number) => v
     }
   }, [update])
   return (
-    <div className="flex flex-col items-center gap-2 select-none h-full justify-center">
-      <span className="text-[15px] font-black text-vbs-muted tracking-widest">BAR</span>
+    <div className="flex flex-col items-center justify-between select-none h-full w-full py-2">
+      <span className="text-[11px] font-bold text-vbs-muted tracking-widest uppercase">T-BAR</span>
       <div ref={trackRef}
-        className={`relative rounded-full bg-white/5 border border-white/10 cursor-pointer w-10 sm:w-12 h-[160px] sm:h-[180px] xl:h-[220px] shrink-0`}
+        className={`relative rounded-full glass-dark border border-white/5 cursor-pointer w-10 sm:w-12 h-32 sm:h-48 xl:h-[200px] shrink-0 my-4 shadow-inner`}
         onMouseDown={(e) => { dragging.current = true; update(e.clientY) }}
         onTouchStart={(e) => { dragging.current = true; update(e.touches[0].clientY) }}>
         <div className="absolute top-0 left-0 right-0 rounded-full transition-none"
-          style={{ height: `${position}%`, background: 'linear-gradient(to bottom, rgba(30,144,255,0.4), rgba(30,144,255,0.1))' }} />
+          style={{ height: `${position}%`, background: 'linear-gradient(to bottom, rgba(30,144,255,0.3), transparent)' }} />
         <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-10" style={{ top: `${position}%` }}>
-          <div className="w-16 sm:w-20 h-8 rounded-lg cursor-grab active:cursor-grabbing
-            flex flex-col items-center justify-center gap-[4px]
-            bg-gradient-to-b from-slate-300 to-slate-500 border border-white/30 shadow-2xl">
-            <div className="w-10 h-[2px] bg-black/40 rounded-full" />
-            <div className="w-10 h-[2px] bg-black/40 rounded-full" />
-            <div className="w-10 h-[2px] bg-black/40 rounded-full" />
+          <div className="w-16 sm:w-20 h-10 rounded-full cursor-grab active:cursor-grabbing
+            flex flex-col items-center justify-center gap-[4px] btn-gradient shadow-[0_4px_15px_rgba(0,0,0,0.5)]">
+            <div className="w-8 h-[2px] bg-white/40 rounded-full" />
+            <div className="w-8 h-[2px] bg-white/40 rounded-full" />
+            <div className="w-8 h-[2px] bg-white/40 rounded-full" />
           </div>
         </div>
       </div>
-      <span className="text-[15px] font-bold text-vbs-accent tabular-nums mt-1">{Math.round(position)}%</span>
+      <div className="flex flex-col items-center">
+        <span className="text-[10px] text-vbs-muted uppercase font-bold mb-[-4px]">Transition</span>
+        <span className="text-3xl font-black text-vbs-accent tabular-nums tracking-tighter drop-shadow-md">{Math.round(position)}<span className="text-[16px] text-vbs-muted">%</span></span>
+      </div>
     </div>
   )
 }
@@ -196,69 +197,69 @@ export default function Switcher({ compact, fullScreen }: SwitcherProps) {
       setTimeout(() => setTbarPos(0), 80)
     }
   }, [state, transitioning, setProgram, setPreview, logOp])
-
   return (
-    <div className={`${fullScreen ? 'w-full h-full flex flex-col gap-2' : `glass rounded-xl flex flex-col gap-4 ${compact ? 'p-4' : 'p-6 md:p-8'}`}`}>
-      {!fullScreen && (
+    <div className={`${fullScreen ? 'w-full h-full flex flex-col gap-2 p-4' : `flex flex-col gap-4 ${compact ? 'p-1' : 'p-2'}`}`}>
+      {!fullScreen && !compact && (
         <div className="flex items-center justify-between pb-2 border-b border-white/5">
-          <span className="text-[14px] font-black text-vbs-muted uppercase tracking-widest">Virtual Switcher</span>
-          <span className="text-[15px] font-bold text-vbs-pvw hidden sm:inline">VBS CORE</span>
+          <span className="text-[12px] font-bold text-vbs-muted uppercase tracking-widest">Virtual Switcher</span>
+          <span className="text-[12px] font-bold text-vbs-pvw hidden sm:inline uppercase">VBS Core</span>
         </div>
       )}
 
-      <div className={`flex flex-col xl:flex-row flex-wrap gap-6 xl:gap-8 items-stretch justify-center ${fullScreen ? 'flex-1 h-full overflow-hidden' : ''}`}>
-        {/* Bus Buttons */}
-        <div className={`flex flex-col gap-4 justify-between ${fullScreen ? 'h-full' : ''}`}>
-          <BusRow label="PGM" activeId={state.program} bus="pgm" fullScreen={fullScreen}
+      {/* Bento Grid Layout for Switcher */}
+      <div className={`grid grid-cols-1 xl:grid-cols-12 gap-4 ${fullScreen ? 'flex-1 h-full' : ''}`}>
+        
+        {/* Left: Bus Buttons (PGM & PVW) - Span 7 */}
+        <div className={`xl:col-span-7 flex flex-col gap-4 justify-center glass-dark rounded-3xl p-5 md:p-6 shadow-xl ${fullScreen ? 'h-full' : ''}`}>
+          <BusRow label="Program" activeId={state.program} bus="pgm" fullScreen={fullScreen}
             inputs={inputs}
             onSelect={(id) => { if (!cooldown.current) setProgram(id) }} />
-          <BusRow label="PVW" activeId={state.preview} bus="pvw" fullScreen={fullScreen}
+          <div className="h-px w-full bg-white/5 my-2" />
+          <BusRow label="Preview" activeId={state.preview} bus="pvw" fullScreen={fullScreen}
             inputs={inputs}
             onSelect={(id) => { if (!cooldown.current) setPreview(id) }} />
         </div>
 
-        {/* T-Bar desktop */}
-        <div className={`hidden xl:flex flex-col items-center justify-center px-4 border-l border-r border-white/5 py-2 ${fullScreen ? 'h-full py-4' : ''}`}>
-          <TBar position={tbarPos} onDrag={handleTbarDrag} />
-        </div>
-        {/* T-Bar mobile */}
-        <div className={`xl:hidden w-full flex justify-center py-4 border-t border-b border-white/5 ${fullScreen ? 'h-[120px]' : ''}`}>
+        {/* Middle: T-Bar - Span 2 */}
+        <div className={`xl:col-span-2 flex flex-col items-center justify-center glass rounded-3xl shadow-xl ${fullScreen ? 'h-full' : 'py-6 xl:py-2'}`}>
           <TBar position={tbarPos} onDrag={handleTbarDrag} />
         </div>
 
-        {/* Controls */}
-        <div className={`flex flex-col gap-4 justify-center ${fullScreen ? 'h-full' : ''}`}>
-          <div className="flex justify-center w-full">
-            <div className="flex flex-col items-center gap-2">
-              <button id="auto-btn" onClick={doAuto} disabled={transitioning}
-                className={`w-16 h-16 sm:w-20 sm:h-20 xl:w-20 xl:h-20 shrink-0 rounded-xl font-black text-[15px] xl:text-[18px] border transition-all active:scale-95 shadow-lg
-                  ${transitioning
-                    ? 'bg-vbs-accent/30 border-vbs-accent text-vbs-accent shadow-[0_0_20px_rgba(30,144,255,0.4)]'
-                    : 'glass border-vbs-accent/50 text-vbs-accent hover:bg-vbs-accent/15 hover:border-vbs-accent'}`}>
-                AUTO
-              </button>
-              <RateInput id="auto-rate" value={autoRate} onChange={setAutoRate} />
-            </div>
+        {/* Right: Controls - Span 3 */}
+        <div className={`xl:col-span-3 flex xl:flex-col gap-4 justify-center glass-dark rounded-3xl p-5 md:p-6 shadow-xl ${fullScreen ? 'h-full' : ''}`}>
+          
+          <div className="flex flex-col items-center gap-2 flex-1 xl:flex-none">
+            <span className="text-[11px] font-bold text-vbs-muted uppercase tracking-widest w-full text-center mb-1">Transition</span>
+            <button id="auto-btn" onClick={doAuto} disabled={transitioning}
+              className={`w-full max-w-[120px] aspect-video rounded-2xl font-black text-[18px] transition-all active:scale-95 shadow-lg
+                ${transitioning
+                  ? 'bg-vbs-accent/50 text-white shadow-[0_0_20px_rgba(30,144,255,0.6)]'
+                  : 'btn-gradient'}`}>
+              AUTO
+            </button>
+            <RateInput id="auto-rate" value={autoRate} onChange={setAutoRate} />
           </div>
 
-          <div className="flex gap-4">
+          <div className="hidden xl:block h-px w-full bg-white/5" />
+
+          <div className="flex gap-4 flex-1 xl:flex-none justify-center">
             <div className="flex flex-col items-center gap-2">
+              <span className="text-[11px] font-bold text-vbs-muted uppercase tracking-widest mb-1 xl:hidden">Cut</span>
               <button id="cut-btn" onClick={doCut}
-                className={`w-16 h-16 sm:w-20 sm:h-20 xl:w-20 xl:h-20 shrink-0 rounded-xl font-black text-[15px] xl:text-[18px] border transition-all active:scale-95 shadow-lg
-                  glass border-vbs-pgm/50 text-vbs-pgm hover:bg-vbs-pgm/20 hover:border-vbs-pgm hover:shadow-[0_0_20px_rgba(255,59,59,0.5)]`}>
+                className={`w-[60px] h-[60px] xl:w-full xl:max-w-[120px] xl:aspect-video rounded-2xl font-black text-[16px] xl:text-[18px] border transition-all active:scale-95 shadow-lg
+                  glass border-vbs-pgm/40 text-vbs-pgm hover:bg-vbs-pgm/20 hover:border-vbs-pgm/80 hover:shadow-[0_0_20px_rgba(255,59,59,0.4)]`}>
                 CUT
               </button>
-              <div className="h-[28px]" />
             </div>
             <div className="flex flex-col items-center gap-2">
+              <span className="text-[11px] font-bold text-vbs-muted uppercase tracking-widest mb-1 xl:hidden">Fade</span>
               <button id="ftm-btn" onClick={doFtb}
-                className={`w-16 h-16 sm:w-20 sm:h-20 xl:w-20 xl:h-20 shrink-0 rounded-xl font-black text-[15px] xl:text-[18px] border transition-all active:scale-95 shadow-lg
+                className={`w-[60px] h-[60px] xl:w-full xl:max-w-[120px] xl:aspect-video rounded-2xl font-black text-[16px] xl:text-[18px] border transition-all active:scale-95 shadow-lg
                   ${ftbOn
-                    ? 'bg-black border-white/60 text-white shadow-[0_0_20px_rgba(255,255,255,0.3)]'
-                    : 'glass border-white/20 text-vbs-muted hover:text-vbs-text hover:border-white/40'}`}>
+                    ? 'bg-white/10 border-white/40 text-white shadow-[inset_0_0_20px_rgba(255,255,255,0.2)]'
+                    : 'glass border-white/10 text-vbs-muted hover:text-white hover:border-white/30 hover:bg-white/5'}`}>
                 FTM
               </button>
-              <RateInput id="ftb-rate" value={ftbRate} onChange={setFtbRate} />
             </div>
           </div>
         </div>
@@ -266,19 +267,19 @@ export default function Switcher({ compact, fullScreen }: SwitcherProps) {
 
       {/* ── Last Operation Result ── */}
       {!fullScreen && !compact && (
-        <div className="mt-2 border-t border-white/5 pt-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[14px] font-black text-vbs-muted uppercase tracking-widest">Last Request</span>
+        <div className="mt-2">
+          <div className="glass-dark rounded-2xl p-4 shadow-xl border border-white/5 flex flex-col">
+            <span className="text-[11px] font-bold text-vbs-muted uppercase tracking-widest mb-3">Last Request</span>
+            {lastOp ? (
+              <div className="flex items-center gap-3 font-mono">
+                <span className="text-[14px] text-vbs-accent font-bold">[{lastOp.time}]</span> 
+                <span className="text-[13px] text-white opacity-80 break-all">{JSON.stringify(lastOp.payload)}</span>
+                {lastOp.error && <span className="text-[13px] text-vbs-pgm font-bold ml-2">Error: {lastOp.error}</span>}
+              </div>
+            ) : (
+              <span className="text-[13px] text-vbs-muted">尚未執行切換操作</span>
+            )}
           </div>
-          {lastOp ? (
-            <div className="glass-dark rounded-lg p-3 font-mono text-[13px] text-vbs-text break-all border border-white/5">
-              <span className="text-vbs-accent mr-2">[{lastOp.time}]</span> 
-              <span className="opacity-80">{JSON.stringify(lastOp.payload)}</span>
-              {lastOp.error && <span className="text-vbs-pgm ml-2">Error: {lastOp.error}</span>}
-            </div>
-          ) : (
-            <span className="text-[13px] text-vbs-muted">尚未執行切換操作</span>
-          )}
         </div>
       )}
     </div>

@@ -23,6 +23,16 @@ export interface AdminEmailLoginResult {
   email?: string
 }
 
+export interface GuestSessionRecord {
+  id: string
+  name: string
+  pin: string
+  expires_at: number
+  access_token?: string
+  token_type?: string
+  magic_link?: string
+}
+
 interface NodeRecord {
   node_type?: string
   metrics?: Record<string, unknown>
@@ -41,7 +51,7 @@ function resolveApiBase(rawBase: string): string {
 }
 
 export async function request<T>(
-  method: 'GET' | 'POST' | 'PUT',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   body?: unknown
 ): Promise<ApiResponse<T>> {
@@ -246,6 +256,41 @@ export async function adminEmailLogin(email: string): Promise<ApiResponse<AdminE
       expires_at: data.expires_at !== undefined ? Number(data.expires_at) : undefined,
       role: data.role ? String(data.role) : undefined,
       email: data.email ? String(data.email) : undefined,
+    },
+  }
+}
+
+export async function createGuestSession(name: string, ttlSeconds: number): Promise<ApiResponse<GuestSessionRecord>> {
+  const res = await request<any>('POST', '/api/v1/guest/sessions', {
+    name,
+    ttl_seconds: ttlSeconds,
+  })
+  if (res.error) return res as ApiResponse<GuestSessionRecord>
+  const data = res.data ?? {}
+  return {
+    ...res,
+    data: {
+      id: String(data.id ?? ''),
+      name: String(data.name ?? ''),
+      pin: String(data.pin ?? ''),
+      expires_at: Number(data.expires_at ?? 0),
+      access_token: data.access_token ? String(data.access_token) : undefined,
+      token_type: data.token_type ? String(data.token_type) : undefined,
+      magic_link: data.magic_link ? String(data.magic_link) : undefined,
+    },
+  }
+}
+
+export async function deleteGuestSession(id: string): Promise<ApiResponse<{ deleted: boolean }>> {
+  const cleanID = String(id).trim()
+  if (!cleanID) return { error: 'session id required' }
+  const res = await request<any>('DELETE', `/api/v1/guest/sessions/${encodeURIComponent(cleanID)}`)
+  if (res.error) return res as ApiResponse<{ deleted: boolean }>
+  const data = res.data ?? {}
+  return {
+    ...res,
+    data: {
+      deleted: Boolean(data.deleted),
     },
   }
 }

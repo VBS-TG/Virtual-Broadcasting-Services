@@ -13,13 +13,31 @@ import Telemetry from './pages/Telemetry'
 import SystemHealth from './pages/SystemHealth'
 import OperationLog from './pages/OperationLog'
 import Settings from './pages/Settings'
+import RentalSessions from './pages/RentalSessions'
 import ToastContainer from './components/ToastContainer'
+import { ShieldAlert } from 'lucide-react'
 import './index.css'
 import './App.css'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn())
   if (!isLoggedIn) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const user = useAuthStore((s) => s.user)
+  if (!user) return <Navigate to="/login" replace />
+  if (user.role !== 'admin') {
+    return (
+      <div className="flex flex-col items-center justify-center h-full w-full">
+        <ShieldAlert className="w-24 h-24 text-vbs-pgm opacity-80 mb-6" />
+        <h1 className="text-6xl font-black text-white tracking-tighter drop-shadow-md mb-2">403</h1>
+        <h2 className="text-2xl font-black text-vbs-pgm mb-2 tracking-widest">ACCESS DENIED</h2>
+        <p className="text-vbs-muted font-bold uppercase tracking-widest text-[12px] bg-white/5 px-4 py-2 rounded-lg">Admin Privileges Required</p>
+      </div>
+    )
+  }
   return <>{children}</>
 }
 
@@ -35,12 +53,13 @@ function AppLayout() {
         <main className="flex-1 overflow-hidden min-h-0">
           <Routes>
             <Route path="/dashboard"   element={<Dashboard />} />
-            <Route path="/runtime"     element={<RuntimeConfig />} />
+            <Route path="/runtime"     element={<RequireAdmin><RuntimeConfig /></RequireAdmin>} />
+            <Route path="/rental-sessions" element={<RequireAdmin><RentalSessions /></RequireAdmin>} />
             <Route path="/switcher"    element={<SwitcherPage />} />
             <Route path="/telemetry"   element={<Telemetry />} />
             <Route path="/system"      element={<SystemHealth />} />
             <Route path="/logs"        element={<OperationLog />} />
-            <Route path="/settings"    element={<Settings />} />
+            <Route path="/settings"    element={<RequireAdmin><Settings /></RequireAdmin>} />
             <Route path="*"            element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </main>
