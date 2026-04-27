@@ -39,6 +39,10 @@ type Config struct {
 	RouteControlBaseURL  string
 	PGMDefaultLatencyMs  int
 	EngineControlBaseURL string
+	RouteAccessClientID     string
+	RouteAccessClientSecret string
+	EngineAccessClientID    string
+	EngineAccessClientSecret string
 }
 
 // Load reads configuration from environment variables.
@@ -135,6 +139,10 @@ func Load() (*Config, error) {
 		RouteControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_BASE_URL")),
 		PGMDefaultLatencyMs: getenvIntDefault("VBS_PGM_DEFAULT_LATENCY_MS", 200),
 		EngineControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ENGINE_CONTROL_BASE_URL")),
+		RouteAccessClientID: strings.TrimSpace(os.Getenv("VBS_ROUTE_ACCESS_CLIENT_ID")),
+		RouteAccessClientSecret: strings.TrimSpace(os.Getenv("VBS_ROUTE_ACCESS_CLIENT_SECRET")),
+		EngineAccessClientID: strings.TrimSpace(os.Getenv("VBS_ENGINE_ACCESS_CLIENT_ID")),
+		EngineAccessClientSecret: strings.TrimSpace(os.Getenv("VBS_ENGINE_ACCESS_CLIENT_SECRET")),
 	}, nil
 }
 
