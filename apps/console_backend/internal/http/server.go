@@ -440,7 +440,7 @@ func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"body required"}`, http.StatusBadRequest)
 		return
 	}
-	respBody, status, err := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/buffer", body)
+	respBody, status, err := s.routeControlPOST("/api/v1/route/buffer", body)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"route buffer proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
 		return
@@ -468,9 +468,7 @@ func (s *Server) handleRouteMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"build metrics request failed"}`, http.StatusInternalServerError)
 		return
 	}
-	if auth := strings.TrimSpace(incomingAuthHeader(r)); auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	s.attachRouteServiceToken(req)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -517,9 +515,7 @@ func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if auth := strings.TrimSpace(incomingAuthHeader(r)); auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	s.attachEngineServiceToken(req)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -563,9 +559,7 @@ func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if auth := strings.TrimSpace(incomingAuthHeader(r)); auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	s.attachEngineServiceToken(req)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -770,19 +764,19 @@ func (s *Server) handleRuntimeConfigApply(w http.ResponseWriter, r *http.Request
 	var prevRoute json.RawMessage
 	var prevEngine json.RawMessage
 	if s.cfg.RouteControlBaseURL != "" {
-		if raw, status, err := s.routeControlGET(incomingAuthHeader(r), "/api/v1/route/runtime/config"); err == nil && status < 400 {
+		if raw, status, err := s.routeControlGET("/api/v1/route/runtime/config"); err == nil && status < 400 {
 			prevRoute = extractConfigPayload(raw)
 		}
 	}
 	if s.cfg.EngineControlBaseURL != "" {
-		if raw, status, err := s.engineControlGET(incomingAuthHeader(r), "/api/v1/runtime/config"); err == nil && status < 400 {
+		if raw, status, err := s.engineControlGET("/api/v1/runtime/config"); err == nil && status < 400 {
 			prevEngine = extractConfigPayload(raw)
 		}
 	}
 
 	routeApplied := false
 	if s.cfg.RouteControlBaseURL != "" {
-		applyBody, applyStatus, applyErr := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/runtime/config/apply", cfgBody)
+		applyBody, applyStatus, applyErr := s.routeControlPOST("/api/v1/route/runtime/config/apply", cfgBody)
 		routeApplied = applyErr == nil && applyStatus < 400
 		result["route"] = map[string]any{
 			"ok":         routeApplied,
@@ -794,9 +788,9 @@ func (s *Server) handleRuntimeConfigApply(w http.ResponseWriter, r *http.Request
 
 	engineApplied := false
 	if s.cfg.EngineControlBaseURL != "" {
-		applyBody, applyStatus, applyErr := s.engineControlPOST(incomingAuthHeader(r), "/api/v1/runtime/config/apply", cfgBody)
+		applyBody, applyStatus, applyErr := s.engineControlPOST("/api/v1/runtime/config/apply", cfgBody)
 		engineApplied = applyErr == nil && applyStatus < 400
-		stateRaw, stateStatus, stateErr := s.engineControlGET(incomingAuthHeader(r), "/api/v1/switch/state")
+		stateRaw, stateStatus, stateErr := s.engineControlGET("/api/v1/switch/state")
 		result["engine"] = map[string]any{
 			"ok":           engineApplied && stateErr == nil && stateStatus < 400,
 			"apply_status": applyStatus,
@@ -810,11 +804,11 @@ func (s *Server) handleRuntimeConfigApply(w http.ResponseWriter, r *http.Request
 	if !routeApplied || !engineApplied {
 		rolled := map[string]bool{}
 		if routeApplied && len(prevRoute) > 0 {
-			_, status, err := s.routeControlPOST(incomingAuthHeader(r), "/api/v1/route/runtime/config/apply", prevRoute)
+			_, status, err := s.routeControlPOST("/api/v1/route/runtime/config/apply", prevRoute)
 			rolled["route"] = err == nil && status < 400
 		}
 		if engineApplied && len(prevEngine) > 0 {
-			_, status, err := s.engineControlPOST(incomingAuthHeader(r), "/api/v1/runtime/config/apply", prevEngine)
+			_, status, err := s.engineControlPOST("/api/v1/runtime/config/apply", prevEngine)
 			rolled["engine"] = err == nil && status < 400
 		}
 		result["rolled_back"] = rolled
@@ -907,16 +901,14 @@ func extractConfigPayload(raw []byte) json.RawMessage {
 	return json.RawMessage(raw)
 }
 
-func (s *Server) routeControlGET(authorization, path string) ([]byte, int, error) {
+func (s *Server) routeControlGET(path string) ([]byte, int, error) {
 	base := strings.TrimRight(s.cfg.RouteControlBaseURL, "/")
 	target := base + path
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		return nil, 0, err
 	}
-	if auth := strings.TrimSpace(authorization); auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	s.attachRouteServiceToken(req)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -930,7 +922,7 @@ func (s *Server) routeControlGET(authorization, path string) ([]byte, int, error
 	return raw, resp.StatusCode, nil
 }
 
-func (s *Server) engineControlGET(authorization, path string) ([]byte, int, error) {
+func (s *Server) engineControlGET(path string) ([]byte, int, error) {
 	base := strings.TrimRight(s.cfg.EngineControlBaseURL, "/")
 	target := base + path
 	req, err := http.NewRequest(http.MethodGet, target, nil)
@@ -938,9 +930,7 @@ func (s *Server) engineControlGET(authorization, path string) ([]byte, int, erro
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if auth := strings.TrimSpace(authorization); auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	s.attachEngineServiceToken(req)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -954,7 +944,7 @@ func (s *Server) engineControlGET(authorization, path string) ([]byte, int, erro
 	return raw, resp.StatusCode, nil
 }
 
-func (s *Server) engineControlPOST(authorization, path string, body []byte) ([]byte, int, error) {
+func (s *Server) engineControlPOST(path string, body []byte) ([]byte, int, error) {
 	base := strings.TrimRight(s.cfg.EngineControlBaseURL, "/")
 	target := base + path
 	req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(string(body)))
@@ -962,9 +952,7 @@ func (s *Server) engineControlPOST(authorization, path string, body []byte) ([]b
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if auth := strings.TrimSpace(authorization); auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	s.attachEngineServiceToken(req)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1003,7 +991,7 @@ func randomDigits(n int) string {
 	return string(b)
 }
 
-func (s *Server) routeControlPOST(authorization, path string, body []byte) ([]byte, int, error) {
+func (s *Server) routeControlPOST(path string, body []byte) ([]byte, int, error) {
 	base := strings.TrimRight(s.cfg.RouteControlBaseURL, "/")
 	target := base + path
 	req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(string(body)))
@@ -1011,9 +999,7 @@ func (s *Server) routeControlPOST(authorization, path string, body []byte) ([]by
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if auth := strings.TrimSpace(authorization); auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	s.attachRouteServiceToken(req)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1027,19 +1013,26 @@ func (s *Server) routeControlPOST(authorization, path string, body []byte) ([]by
 	return raw, resp.StatusCode, nil
 }
 
-func incomingAuthHeader(r *http.Request) string {
-	if r == nil {
-		return ""
+func (s *Server) attachRouteServiceToken(req *http.Request) {
+	if req == nil {
+		return
 	}
-	if cfJWT := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion")); cfJWT != "" {
-		return "Bearer " + cfJWT
+	if id := strings.TrimSpace(s.cfg.RouteAccessClientID); id != "" {
+		req.Header.Set("Cf-Access-Client-Id", id)
 	}
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
-	if auth == "" {
-		return ""
+	if secret := strings.TrimSpace(s.cfg.RouteAccessClientSecret); secret != "" {
+		req.Header.Set("Cf-Access-Client-Secret", secret)
 	}
-	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-		return auth
+}
+
+func (s *Server) attachEngineServiceToken(req *http.Request) {
+	if req == nil {
+		return
 	}
-	return ""
+	if id := strings.TrimSpace(s.cfg.EngineAccessClientID); id != "" {
+		req.Header.Set("Cf-Access-Client-Id", id)
+	}
+	if secret := strings.TrimSpace(s.cfg.EngineAccessClientSecret); secret != "" {
+		req.Header.Set("Cf-Access-Client-Secret", secret)
+	}
 }
