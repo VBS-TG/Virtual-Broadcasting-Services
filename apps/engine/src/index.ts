@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
-import { createRemoteJWKSet, importSPKI, jwtVerify, type KeyLike, type JWTPayload } from "jose";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import WebSocket from "ws";
 
 interface RuntimeState {
@@ -52,16 +52,12 @@ const telemetryEnabled = env("VBS_ENGINE_TELEMETRY_ENABLED", "1") !== "0" && con
 const telemetryPath = env("VBS_ENGINE_TELEMETRY_WS_PATH", "/vbs/telemetry/ws");
 const telemetryIntervalSec = Number(env("VBS_METRICS_INTERVAL_SEC", "1")) || 1;
 const nodeId = env("VBS_NODE_ID", "vbs-engine");
-const cfAccessJWT = env("VBS_CF_ACCESS_JWT", "");
 const cfAccessClientID = env("VBS_CF_ACCESS_CLIENT_ID", "");
 const cfAccessClientSecret = env("VBS_CF_ACCESS_CLIENT_SECRET", "");
 const cfAccessAud = requiredEnv("VBS_CF_ACCESS_AUD");
 const cfAccessTeamDomain = env("VBS_CF_ACCESS_TEAM_DOMAIN", "");
 const cfAccessJWKSURL = env("VBS_CF_ACCESS_JWKS_URL", "");
-const adminEmails = splitCSVLower(env("VBS_ADMIN_EMAILS", ""));
 const nodeCNPrefix = env("VBS_NODE_CN_PREFIX", "vbs-node-").toLowerCase();
-const consoleJWTIssuer = env("VBS_CONSOLE_JWT_ISSUER", "vbs-console");
-const consoleJWTPublicKeys = splitCSVRaw(env("VBS_CONSOLE_JWT_PUBLIC_KEYS", ""));
 
 const cfIssuer = resolveIssuer(cfAccessTeamDomain);
 const resolvedJWKSURL = resolveJWKSURL(cfIssuer, cfAccessJWKSURL);
@@ -69,7 +65,6 @@ const jwksCacheSec = intEnv("VBS_CF_JWKS_CACHE_TTL_SEC", 3600);
 const remoteJWKSet = createRemoteJWKSet(new URL(resolvedJWKSURL), {
   cacheMaxAge: Math.max(60, jwksCacheSec) * 1000,
 });
-const consolePublicKeyLoaders = consoleJWTPublicKeys.map((k) => parseEd25519PublicKey(k));
 
 const state: RuntimeState = {
   program: "",
@@ -286,24 +281,9 @@ async function activateProduction(productionID: string): Promise<void> {
 
 async function authorized(req: IncomingMessage): Promise<boolean> {
   const cfAssertion = String(req.headers["cf-access-jwt-assertion"] ?? "").trim();
-  const auth = String(req.headers.authorization ?? "").trim();
-  const raw = cfAssertion || (auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "");
-  if (!raw) return false;
-  const role = await resolveRoleFromToken(raw);
-  return role === "admin" || role === "operator";
-}
-
-async function resolveRoleFromToken(raw: string): Promise<string> {
-  try {
-    const payload = decodePayload(raw);
-    const iss = String(payload.iss ?? "").trim();
-    if (iss && iss === consoleJWTIssuer) {
-      return await resolveConsoleRole(raw);
-    }
-    return await resolveCloudflareRole(raw);
-  } catch {
-    return "";
-  }
+  if (!cfAssertion) return false;
+  const role = await resolveCloudflareRole(cfAssertion);
+  return role === "node";
 }
 
 async function resolveCloudflareRole(raw: string): Promise<string> {
@@ -312,93 +292,11 @@ async function resolveCloudflareRole(raw: string): Promise<string> {
   const { payload } = await jwtVerify(raw, remoteJWKSet, options);
   const role = String(payload.role ?? "").trim().toLowerCase();
   if (role) return role;
-  const email = String(payload.email ?? "").trim().toLowerCase();
   const commonName = String(payload.common_name ?? "").trim().toLowerCase();
-  if (adminEmails.includes(email)) return "admin";
   if (commonName.startsWith(nodeCNPrefix)) return "node";
   // Cloudflare Service Token 常見以 "<client_id>.access" 形式出現在 common_name。
   if (commonName.endsWith(".access")) return "node";
   return "";
-}
-
-async function resolveConsoleRole(raw: string): Promise<string> {
-  for (const loader of consolePublicKeyLoaders) {
-    try {
-      const key = await loader;
-      const { payload } = await jwtVerify(raw, key, {
-        issuer: consoleJWTIssuer,
-        audience: cfAccessAud,
-      });
-      const role = String(payload.role ?? "").trim().toLowerCase();
-      if (role === "operator") {
-        const subject = String(payload.sub ?? "").trim();
-        const guestId = subject.startsWith("guest:") ? subject.slice("guest:".length) : "";
-        const sessionVersion = Number(payload.sv ?? 0);
-        const active = await introspectGuestSession(guestId, sessionVersion);
-        if (!active) return "";
-      }
-      return role;
-    } catch {
-      // try next key
-    }
-  }
-  return "";
-}
-
-async function introspectGuestSession(guestId: string, sessionVersion: number): Promise<boolean> {
-  if (!guestId || !consoleBase) return false;
-  try {
-    const base = consoleBase.replace(/\/+$/, "");
-    const authHeaders = accessHeaders();
-    const res = await fetch(`${base}/api/v1/guest/introspect`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
-      body: JSON.stringify({
-        guest_id: guestId,
-        session_version: sessionVersion,
-      }),
-    });
-    if (!res.ok) return false;
-    const out = (await res.json()) as { active?: boolean };
-    return out.active === true;
-  } catch {
-    return false;
-  }
-}
-
-function decodePayload(raw: string): JWTPayload {
-  const parts = raw.split(".");
-  if (parts.length < 2) return {};
-  const json = Buffer.from(parts[1], "base64url").toString("utf8");
-  return JSON.parse(json) as JWTPayload;
-}
-
-function splitCSVLower(raw: string): string[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0);
-}
-
-function splitCSVRaw(raw: string): string[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-function normalizePEM(raw: string): string {
-  return raw.replace(/\\n/g, "\n").trim();
-}
-
-async function parseEd25519PublicKey(raw: string): Promise<KeyLike> {
-  const pem = normalizePEM(raw);
-  return importSPKI(pem, "EdDSA");
 }
 
 function ensureSourceAllowed(source: string, cfg: RuntimeConfig): boolean {
@@ -524,7 +422,7 @@ async function sendTelemetryLoop(): Promise<void> {
         node_type: "engine",
         ts_ms: Date.now(),
         metrics: { workers: 0, cpu_pct: 0 },
-        auth_mode: "cf_access",
+        auth_mode: "cf_service_token",
       };
       const raw = JSON.stringify(payload);
       if (Buffer.byteLength(raw, "utf8") <= 255) {
@@ -546,18 +444,13 @@ async function sendTelemetryLoop(): Promise<void> {
 }
 
 function accessHeaders(): Record<string, string> {
-  if (cfAccessJWT) {
-    return {
-      Authorization: `Bearer ${cfAccessJWT}`,
-    };
-  }
   if (cfAccessClientID && cfAccessClientSecret) {
     return {
       "Cf-Access-Client-Id": cfAccessClientID,
       "Cf-Access-Client-Secret": cfAccessClientSecret,
     };
   }
-  throw new Error("Missing Cloudflare Access credentials: set VBS_CF_ACCESS_JWT or VBS_CF_ACCESS_CLIENT_ID/VBS_CF_ACCESS_CLIENT_SECRET");
+  throw new Error("Missing Cloudflare Access credentials: set VBS_CF_ACCESS_CLIENT_ID and VBS_CF_ACCESS_CLIENT_SECRET");
 }
 
 const server = createServer(async (req, res) => {
