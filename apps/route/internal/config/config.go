@@ -19,17 +19,13 @@ type Config struct {
 
 	// Console 控制平面（HTTPS 基底網址，用於衍生 WSS 遙測 URL）
 	ConsoleBaseURL string
-	CFAccessJWT         string
 	CFAccessClientID    string
 	CFAccessClientSecret string
 	CFAccessTeamDomain  string
 	CFAccessAUD         string
 	CFAccessJWKSURL     string
 	CFAccessJWKSCacheTTL time.Duration
-	AdminEmails         []string
 	NodeCNPrefix        string
-	ConsoleJWTIssuer    string
-	ConsoleJWTPublicKeys []string
 
 	// WSS 遙測路徑（相對於 Console 主機），預設見 Load。
 	TelemetryWSPath string
@@ -70,17 +66,13 @@ const (
 	envLogLevel      = "VBS_LOG_LEVEL"
 
 	envConsoleBaseURL = "VBS_CONSOLE_BASE_URL"
-	envCFAccessJWT = "VBS_CF_ACCESS_JWT"
 	envCFAccessClientID = "VBS_CF_ACCESS_CLIENT_ID"
 	envCFAccessClientSecret = "VBS_CF_ACCESS_CLIENT_SECRET"
 	envCFAccessTeamDomain = "VBS_CF_ACCESS_TEAM_DOMAIN"
 	envCFAccessAUD = "VBS_CF_ACCESS_AUD"
 	envCFAccessJWKSURL = "VBS_CF_ACCESS_JWKS_URL"
 	envCFAccessJWKSCacheTTL = "VBS_CF_JWKS_CACHE_TTL_SEC"
-	envAdminEmails = "VBS_ADMIN_EMAILS"
 	envNodeCNPrefix = "VBS_NODE_CN_PREFIX"
-	envConsoleJWTIssuer = "VBS_CONSOLE_JWT_ISSUER"
-	envConsoleJWTPublicKeys = "VBS_CONSOLE_JWT_PUBLIC_KEYS"
 	envTelemetryPath  = "VBS_ROUTE_TELEMETRY_WS_PATH"
 	envTLSInsecure    = "VBS_ROUTE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY"
 
@@ -113,16 +105,12 @@ func Load() Config {
 		LogLevel:      getenvOrDefault(envLogLevel, "info"),
 
 		ConsoleBaseURL: strings.TrimSpace(os.Getenv(envConsoleBaseURL)),
-		CFAccessJWT: strings.TrimSpace(os.Getenv(envCFAccessJWT)),
 		CFAccessClientID: strings.TrimSpace(os.Getenv(envCFAccessClientID)),
 		CFAccessClientSecret: strings.TrimSpace(os.Getenv(envCFAccessClientSecret)),
 		CFAccessTeamDomain: strings.TrimSpace(os.Getenv(envCFAccessTeamDomain)),
 		CFAccessAUD: strings.TrimSpace(os.Getenv(envCFAccessAUD)),
 		CFAccessJWKSURL: strings.TrimSpace(os.Getenv(envCFAccessJWKSURL)),
-		AdminEmails: splitCSVLower(os.Getenv(envAdminEmails)),
 		NodeCNPrefix: strings.TrimSpace(strings.ToLower(getenvOrDefault(envNodeCNPrefix, "vbs-node-"))),
-		ConsoleJWTIssuer: strings.TrimSpace(getenvOrDefault(envConsoleJWTIssuer, "vbs-console")),
-		ConsoleJWTPublicKeys: splitCSVRaw(os.Getenv(envConsoleJWTPublicKeys)),
 		TelemetryWSPath: getenvOrDefault(envTelemetryPath, "/vbs/telemetry/ws"),
 	}
 	cacheTTL := getenvIntOrDefault(envCFAccessJWKSCacheTTL, 3600)
@@ -214,8 +202,8 @@ func (c Config) Validate() error {
 	if c.ConsoleBaseURL == "" {
 		return fmt.Errorf("VBS_CONSOLE_BASE_URL 為必填（Console 控制平面 HTTPS 基底）")
 	}
-	if c.CFAccessJWT == "" && (c.CFAccessClientID == "" || c.CFAccessClientSecret == "") {
-		return fmt.Errorf("需設定 VBS_CF_ACCESS_JWT，或同時設定 VBS_CF_ACCESS_CLIENT_ID 與 VBS_CF_ACCESS_CLIENT_SECRET")
+	if c.CFAccessClientID == "" || c.CFAccessClientSecret == "" {
+		return fmt.Errorf("需同時設定 VBS_CF_ACCESS_CLIENT_ID 與 VBS_CF_ACCESS_CLIENT_SECRET")
 	}
 	if c.CFAccessAUD == "" {
 		return fmt.Errorf("需設定 VBS_CF_ACCESS_AUD")
@@ -223,17 +211,8 @@ func (c Config) Validate() error {
 	if c.CFAccessTeamDomain == "" && c.CFAccessJWKSURL == "" {
 		return fmt.Errorf("需設定 VBS_CF_ACCESS_TEAM_DOMAIN 或 VBS_CF_ACCESS_JWKS_URL")
 	}
-	if len(c.AdminEmails) == 0 {
-		return fmt.Errorf("需設定 VBS_ADMIN_EMAILS")
-	}
 	if c.NodeCNPrefix == "" {
 		return fmt.Errorf("需設定 VBS_NODE_CN_PREFIX")
-	}
-	if c.ConsoleJWTIssuer == "" {
-		return fmt.Errorf("需設定 VBS_CONSOLE_JWT_ISSUER")
-	}
-	if len(c.ConsoleJWTPublicKeys) == 0 {
-		return fmt.Errorf("需設定 VBS_CONSOLE_JWT_PUBLIC_KEYS")
 	}
 	if c.SRTLAIngestPort <= 0 || c.SRTOutputPort <= 0 || c.InternalSRTPort <= 0 {
 		return fmt.Errorf("Route 埠號必須為正整數")

@@ -399,13 +399,6 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleauth.Provider) bool {
 	got := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion"))
 	if got == "" {
-		h := strings.TrimSpace(r.Header.Get("Authorization"))
-		if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
-			return false
-		}
-		got = strings.TrimSpace(h[7:])
-	}
-	if got == "" {
 		return false
 	}
 	if auth == nil {
@@ -416,7 +409,7 @@ func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleaut
 		return false
 	}
 	role := strings.TrimSpace(strings.ToLower(claims.Role))
-	return role == "admin" || role == "operator"
+	return role == "node"
 }
 
 func randomHex(n int) string {
