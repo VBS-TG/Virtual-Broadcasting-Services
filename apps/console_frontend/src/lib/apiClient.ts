@@ -33,12 +33,20 @@ interface PresenceRecord {
   online?: boolean
 }
 
+function resolveApiBase(rawBase: string): string {
+  const trimmed = rawBase.trim()
+  if (!trimmed) return 'https://vbsapi.cyblisswisdom.org'
+  if (trimmed === 'https://vbs.cyblisswisdom.org') return 'https://vbsapi.cyblisswisdom.org'
+  return trimmed
+}
+
 export async function request<T>(
   method: 'GET' | 'POST' | 'PUT',
   path: string,
   body?: unknown
 ): Promise<ApiResponse<T>> {
   const settings = useSettingsStore.getState().settings
+  const apiBase = resolveApiBase(settings.apiBaseUrl)
   const token = useAuthStore.getState().user?.token ?? ''
   const start = performance.now()
 
@@ -49,9 +57,10 @@ export async function request<T>(
       'Content-Type': 'application/json',
     }
     if (token) headers.Authorization = `Bearer ${token}`
-    const res = await fetch(`${settings.apiBaseUrl}${path}`, {
+    const res = await fetch(`${apiBase}${path}`, {
       method,
       signal: controller.signal,
+      credentials: 'include',
       headers,
       body: body ? JSON.stringify(body) : undefined,
     })
