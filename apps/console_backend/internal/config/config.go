@@ -35,6 +35,7 @@ type Config struct {
 	GuestTokenTTL        time.Duration
 	GuestDBPath          string
 	RuntimeDBPath        string
+	ShowConfigDBPath     string
 
 	RouteControlBaseURL  string
 	PGMDefaultLatencyMs  int
@@ -43,6 +44,10 @@ type Config struct {
 	RouteAccessClientSecret string
 	EngineAccessClientID    string
 	EngineAccessClientSecret string
+
+	CaptureControlBaseURL    string
+	CaptureAccessClientID    string
+	CaptureAccessClientSecret string
 }
 
 // Load reads configuration from environment variables.
@@ -117,6 +122,7 @@ func Load() (*Config, error) {
 	if runtimeDBPath == "" {
 		return nil, fmt.Errorf("VBS_RUNTIME_DB_PATH is required")
 	}
+	showCfgDBPath := strings.TrimSpace(getenvDefault("VBS_SHOW_CONFIG_DB_PATH", "data/console-show-config.db"))
 
 	return &Config{
 		ListenAddr:         listen,
@@ -136,6 +142,7 @@ func Load() (*Config, error) {
 		GuestTokenTTL:      time.Duration(guestTTL) * time.Second,
 		GuestDBPath:        guestDBPath,
 		RuntimeDBPath:      runtimeDBPath,
+		ShowConfigDBPath:   showCfgDBPath,
 		RouteControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_BASE_URL")),
 		PGMDefaultLatencyMs: getenvIntDefault("VBS_PGM_DEFAULT_LATENCY_MS", 200),
 		EngineControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ENGINE_CONTROL_BASE_URL")),
@@ -143,6 +150,9 @@ func Load() (*Config, error) {
 		RouteAccessClientSecret: strings.TrimSpace(os.Getenv("VBS_ROUTE_ACCESS_CLIENT_SECRET")),
 		EngineAccessClientID: strings.TrimSpace(os.Getenv("VBS_ENGINE_ACCESS_CLIENT_ID")),
 		EngineAccessClientSecret: strings.TrimSpace(os.Getenv("VBS_ENGINE_ACCESS_CLIENT_SECRET")),
+		CaptureControlBaseURL: strings.TrimSpace(os.Getenv("VBS_CAPTURE_CONTROL_BASE_URL")),
+		CaptureAccessClientID: strings.TrimSpace(os.Getenv("VBS_CAPTURE_ACCESS_CLIENT_ID")),
+		CaptureAccessClientSecret: strings.TrimSpace(os.Getenv("VBS_CAPTURE_ACCESS_CLIENT_SECRET")),
 	}, nil
 }
 

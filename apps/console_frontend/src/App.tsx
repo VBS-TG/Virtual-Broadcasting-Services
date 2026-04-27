@@ -13,6 +13,8 @@ import SystemHealth from './pages/SystemHealth'
 import OperationLog from './pages/OperationLog'
 import Settings from './pages/Settings'
 import RentalSessions from './pages/RentalSessions'
+import PipelinePage from './pages/PipelinePage'
+import ShowControlPage from './pages/ShowControlPage'
 import ToastContainer from './components/ToastContainer'
 import { ShieldAlert } from 'lucide-react'
 import './index.css'
@@ -53,6 +55,8 @@ function AppLayout() {
           <Routes>
             <Route path="/dashboard"   element={<Dashboard />} />
             <Route path="/runtime"     element={<RequireAdmin><RuntimeConfig /></RequireAdmin>} />
+            <Route path="/pipeline"    element={<PipelinePage />} />
+            <Route path="/show-config" element={<ShowControlPage />} />
             <Route path="/rental-sessions" element={<RequireAdmin><RentalSessions /></RequireAdmin>} />
             <Route path="/switcher"    element={<SwitcherPage />} />
             <Route path="/telemetry"   element={<Telemetry />} />

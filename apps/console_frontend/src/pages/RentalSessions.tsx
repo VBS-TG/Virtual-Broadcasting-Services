@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { KeyRound, Plus, Trash2, Clock } from 'lucide-react'
+import { KeyRound, Plus, Trash2, Clock, RefreshCw } from 'lucide-react'
 import { useRentalStore } from '../stores/rentalStore'
 
 export default function RentalSessions() {
-  const { sessions, generate, revoke, loading, error } = useRentalStore()
+  const { sessions, generate, revoke, loading, error, fetch } = useRentalStore()
   const [label, setLabel] = useState('')
   const [ttlHrs, setTtlHrs] = useState('24')
 
@@ -15,6 +15,9 @@ export default function RentalSessions() {
   }
 
   const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    void useRentalStore.getState().fetch()
+  }, [])
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
@@ -62,7 +65,24 @@ export default function RentalSessions() {
 
         {/* List Card (Span 8) */}
         <div className="md:col-span-8 glass rounded-3xl p-6 shadow-xl flex flex-col min-h-[400px]">
-          <span className="text-[12px] font-bold text-vbs-muted uppercase tracking-widest mb-4">Active Sessions</span>
+          <div className="flex justify-between items-center mb-4">
+            <span className="text-[12px] font-bold text-vbs-muted uppercase tracking-widest">Active Sessions</span>
+            <button
+              type="button"
+              onClick={() => void fetch()}
+              disabled={loading}
+              className="text-vbs-accent hover:text-white transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+          
+          {error && (
+            <div className="bg-vbs-pgm/20 border border-vbs-pgm/50 text-vbs-pgm px-4 py-2 rounded-xl mb-4 text-[13px] font-bold">
+              {error}
+            </div>
+          )}
+
           <div className="flex flex-col gap-3 flex-1">
             {sessions.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center opacity-50">
@@ -71,16 +91,17 @@ export default function RentalSessions() {
               </div>
             ) : (
               sessions.map((s) => {
-                const expired = now > s.expiresAt
-                const remainingSecs = Math.max(0, Math.floor((s.expiresAt - now) / 1000))
+                const expiresAtMs = s.expires_at * 1000
+                const expired = now > expiresAtMs
+                const remainingSecs = Math.max(0, Math.floor((expiresAtMs - now) / 1000))
                 const hrs = Math.floor(remainingSecs / 3600)
                 const mins = Math.floor((remainingSecs % 3600) / 60)
                 
                 return (
                   <div key={s.id} className={`glass-dark border ${expired ? 'border-vbs-pgm/30 opacity-50' : 'border-white/5'} rounded-2xl p-4 flex items-center justify-between shadow-md`}>
                     <div className="flex flex-col">
-                      <span className="text-[12px] font-bold text-vbs-muted uppercase tracking-widest">{s.label}</span>
-                      <span className="text-2xl font-black text-white font-mono tracking-widest drop-shadow-md mt-1">{s.token}</span>
+                      <span className="text-[12px] font-bold text-vbs-muted uppercase tracking-widest">{s.name}</span>
+                      <span className="text-2xl font-black text-white font-mono tracking-widest drop-shadow-md mt-1">{s.pin}</span>
                     </div>
                     <div className="flex items-center gap-6">
                       <div className="flex flex-col items-end">

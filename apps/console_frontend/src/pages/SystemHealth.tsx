@@ -25,10 +25,16 @@ export default function SystemHealth() {
 
   const runCheck = async () => {
     setChecking(true)
+    const api = settings.apiBaseUrl.replace(/\/$/, '')
+    const eng = settings.engineBaseUrl.replace(/\/$/, '')
     const targets = [
-      { label: 'Console API (/healthz)', url: `${settings.apiBaseUrl}/healthz` },
-      { label: 'Engine Switcher', url: `${settings.engineBaseUrl}/healthz` },
+      { label: 'Console API (/healthz)', url: `${api}/healthz` },
+      { label: 'Engine Switcher', url: `${eng}/healthz` },
     ]
+    const route = (settings.routeBaseUrl ?? '').trim().replace(/\/$/, '')
+    if (route) {
+      targets.push({ label: 'Route', url: `${route}/healthz` })
+    }
     const checks = await Promise.all(
       targets.map(async (t) => {
         const r = await checkHealth(t.url)
@@ -65,8 +71,15 @@ export default function SystemHealth() {
       {/* 說明 */}
       <div className="glass rounded-xl p-4 flex flex-col gap-1.5">
         <p className="text-[15px] font-semibold text-vbs-muted">目標端點</p>
-        <p className="text-[15px] font-mono text-vbs-text break-all">{settings.apiBaseUrl}/healthz</p>
-        <p className="text-[15px] font-mono text-vbs-text break-all">{settings.engineBaseUrl}/healthz</p>
+        <p className="text-[15px] font-mono text-vbs-text break-all">{settings.apiBaseUrl.replace(/\/$/, '')}/healthz</p>
+        <p className="text-[15px] font-mono text-vbs-text break-all">{settings.engineBaseUrl.replace(/\/$/, '')}/healthz</p>
+        {(settings.routeBaseUrl ?? '').trim() ? (
+          <p className="text-[15px] font-mono text-vbs-text break-all">
+            {(settings.routeBaseUrl ?? '').trim().replace(/\/$/, '')}/healthz
+          </p>
+        ) : (
+          <p className="text-[15px] text-vbs-muted">Route：未設定（至 Settings 填寫 Route Base URL）</p>
+        )}
         <p className="text-[15px] text-vbs-muted mt-1">
           點擊「執行健康檢查」後，系統將對以上端點發送 GET 請求並記錄 HTTP 狀態碼與延遲。
         </p>

@@ -1,7 +1,9 @@
+import { timingSafeEqual } from "node:crypto";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import WebSocket from "ws";
+import { normalizeShowConfig, validateShowConfig, type ShowConfig } from "./showConfig.js";
 
 interface RuntimeState {
   program: string;
@@ -279,7 +281,27 @@ async function activateProduction(productionID: string): Promise<void> {
   throw new Error(`open live activate production status=${res.status} body=${raw.slice(0, 200)}`);
 }
 
+/** 與 Route 相同：Console Orchestrator 送 Cf-Access-Client-Id/Secret 時自動通過（須與本節點 VBS_CF_ACCESS_* 一致）。 */
+function matchInboundAccessServiceToken(req: IncomingMessage): boolean {
+  const wantId = cfAccessClientID.trim();
+  const wantSecret = cfAccessClientSecret.trim();
+  if (!wantId || !wantSecret) return false;
+  const gotId = String(req.headers["cf-access-client-id"] ?? "").trim();
+  const gotSecret = String(req.headers["cf-access-client-secret"] ?? "").trim();
+  if (!gotId || !gotSecret) return false;
+  try {
+    const bi = Buffer.from(gotId);
+    const wi = Buffer.from(wantId);
+    const bs = Buffer.from(gotSecret);
+    const ws = Buffer.from(wantSecret);
+    return timingSafeEqual(bi, wi) && timingSafeEqual(bs, ws);
+  } catch {
+    return false;
+  }
+}
+
 async function authorized(req: IncomingMessage): Promise<boolean> {
+  if (matchInboundAccessServiceToken(req)) return true;
   const cfAssertion = String(req.headers["cf-access-jwt-assertion"] ?? "").trim();
   if (!cfAssertion) return false;
   const role = await resolveCloudflareRole(cfAssertion);
@@ -394,6 +416,18 @@ async function readBody(req: IncomingMessage): Promise<any> {
   return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
 }
 
+async function readBodyLimited(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const b = Buffer.from(chunk);
+    total += b.length;
+    if (total > maxBytes) throw new Error("body too large");
+    chunks.push(b);
+  }
+  return Buffer.concat(chunks);
+}
+
 function writeJson(res: ServerResponse, code: number, body: unknown): void {
   const raw = Buffer.from(JSON.stringify(body));
   res.statusCode = code;
@@ -505,6 +539,27 @@ const server = createServer(async (req, res) => {
         aux_sources: body.aux_sources,
       });
       writeJson(res, 200, { applied: true, config: applied, state });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/v1/show-config/apply") {
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
+      try {
+        const buf = await readBodyLimited(req, 512 * 1024);
+        const parsed = JSON.parse(buf.toString("utf-8")) as ShowConfig;
+        normalizeShowConfig(parsed);
+        const verr = validateShowConfig(parsed, runtimeConfig.inputs);
+        if (verr) return writeJson(res, 400, { error: verr });
+        console.log(
+          `[engine][show-config] applied panel=${parsed.switcher.panel_id} sources=${parsed.sources?.length ?? 0} cells=${parsed.multiview.cells?.length ?? 0}`,
+        );
+        writeJson(res, 200, {
+          applied: true,
+          node: "engine",
+          inputs: runtimeConfig.inputs,
+        });
+      } catch (e) {
+        writeJson(res, 400, { error: String(e) });
+      }
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/program") {

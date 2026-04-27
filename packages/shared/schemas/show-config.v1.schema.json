@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vbs/schemas/show-config.v1.schema.json",
+  "title": "VBS Show Config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile", "sources", "switcher", "multiview"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["pipeline_locked", "hop_override"]
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height", "frame_rate"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 16 },
+            "height": { "type": "integer", "minimum": 16 },
+            "frame_rate": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "hop_overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slot_id", "display_name"],
+        "properties": {
+          "slot_id": { "type": "string", "pattern": "^input[1-8]$" },
+          "display_name": { "type": "string", "minLength": 1 },
+          "short_label": { "type": "string" },
+          "group_id": { "type": "string" }
+        }
+      }
+    },
+    "switcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["panel_id", "rows"],
+      "properties": {
+        "panel_id": { "type": "string", "minLength": 1 },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["buttons"],
+            "properties": {
+              "buttons": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["position", "bind"],
+                  "properties": {
+                    "position": { "type": "integer", "minimum": 0 },
+                    "bind": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["kind"],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["input", "black", "bars"]
+                        },
+                        "ref": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "multiview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["template_id", "cells"],
+      "properties": {
+        "template_id": { "type": "string", "minLength": 1 },
+        "cells": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cell_index", "role", "source_ref"],
+            "properties": {
+              "cell_index": { "type": "integer", "minimum": 0 },
+              "role": {
+                "type": "string",
+                "enum": ["preview_large", "program_large", "thumb", "off"]
+              },
+              "source_ref": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

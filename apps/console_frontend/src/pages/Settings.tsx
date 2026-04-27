@@ -7,7 +7,10 @@ export default function Settings() {
   const { settings, update, reset } = useSettingsStore()
   const [saved, setSaved] = useState(false)
 
-  const [local, setLocal] = useState({ ...settings })
+  const [local, setLocal] = useState({
+    ...settings,
+    routeBaseUrl: settings.routeBaseUrl ?? '',
+  })
   const isAdmin = canAccess('admin')
 
   const handleSave = () => {
@@ -52,6 +55,23 @@ export default function Settings() {
             className="glass-dark border border-white/10 rounded-xl px-4 py-3 text-[17px] font-mono text-vbs-text
               bg-transparent outline-none focus:border-vbs-accent/50 transition-colors disabled:opacity-50"
           />
+        </div>
+
+        {/* Route Base URL（僅前端健康檢查用） */}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="settings-route-url" className="text-[15px] font-semibold text-vbs-muted uppercase tracking-widest">
+            Route 控制面 Base URL
+          </label>
+          <input
+            id="settings-route-url"
+            type="text"
+            value={local.routeBaseUrl ?? ''}
+            disabled={!isAdmin}
+            onChange={(e) => setLocal({ ...local, routeBaseUrl: e.target.value })}
+            className="glass-dark border border-white/10 rounded-xl px-4 py-3 text-[17px] font-mono text-vbs-text
+              bg-transparent outline-none focus:border-vbs-accent/50 transition-colors disabled:opacity-50"
+          />
+          <p className="text-[12px] text-vbs-muted">留空則「系統健康」不檢查 Route；請填可連線之基底（會自動附加 /healthz）。</p>
         </div>
 
         {/* API Timeout */}
@@ -130,7 +150,11 @@ export default function Settings() {
         </button>
         <button
           id="settings-reset"
-          onClick={() => { reset(); setLocal({ ...settings }) }}
+          onClick={() => {
+            reset()
+            const s = useSettingsStore.getState().settings
+            setLocal({ ...s, routeBaseUrl: s.routeBaseUrl ?? '' })
+          }}
           disabled={!isAdmin}
           title={!isAdmin ? "權限不足：僅管理員可修改" : ""}
           className={`px-6 py-3 rounded-xl font-bold text-[17px] border transition-all active:scale-95

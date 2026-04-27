@@ -38,6 +38,7 @@ type Server struct {
 	eventConns map[*websocket.Conn]struct{}
 	guestStore *guestStore
 	runtimeStore *runtimeStore
+	showStore    *showConfigStore
 
 	runtimeMu        sync.RWMutex
 	runtimeCfg       runtimeConfig
@@ -93,6 +94,11 @@ func New(cfg *config.Config) *Server {
 		log.Fatalf("runtime store init failed: %v", err)
 	}
 	s.runtimeStore = rtStore
+	scStore, err := openShowConfigStore(cfg.ShowConfigDBPath)
+	if err != nil {
+		log.Fatalf("show config store init failed: %v", err)
+	}
+	s.showStore = scStore
 	if savedCfg, savedAt, err := s.runtimeStore.Load(); err == nil {
 		if err := validateRuntimeConfig(savedCfg); err == nil {
 			s.runtimeCfg = savedCfg
@@ -168,6 +174,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/switch/preview", s.handleSwitchPreview)
 	s.mux.HandleFunc("POST /api/v1/switch/aux", s.handleSwitchAUX)
 	s.mux.HandleFunc("GET /api/v1/switch/state", s.handleSwitchState)
+	s.mux.HandleFunc("GET /api/v1/guest/sessions", s.handleGuestSessionList)
 	s.mux.HandleFunc("POST /api/v1/guest/sessions", s.handleGuestSessionCreate)
 	s.mux.HandleFunc("DELETE /api/v1/guest/sessions/{id}", s.handleGuestSessionDelete)
 	s.mux.HandleFunc("POST /api/v1/guest/exchange-pin", s.handleGuestExchangePIN)
@@ -175,6 +182,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/runtime/config", s.handleRuntimeConfigGet)
 	s.mux.HandleFunc("PUT /api/v1/runtime/config", s.handleRuntimeConfigPut)
 	s.mux.HandleFunc("POST /api/v1/runtime/config/apply", s.handleRuntimeConfigApply)
+	s.mux.HandleFunc("GET /api/v1/show-config", s.handleShowConfigGet)
+	s.mux.HandleFunc("PUT /api/v1/show-config/draft", s.handleShowConfigDraftPut)
+	s.mux.HandleFunc("POST /api/v1/show-config/apply", s.handleShowConfigApply)
+	s.mux.HandleFunc("POST /api/v1/show-config/rollback", s.handleShowConfigRollback)
+	s.mux.HandleFunc("GET /api/v1/show-config/history", s.handleShowConfigHistory)
 }
 
 func (s *Server) handleAdminEmailLogin(w http.ResponseWriter, r *http.Request) {
@@ -234,6 +246,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.runtimeStore != nil {
 		_ = s.runtimeStore.Close()
+	}
+	if s.showStore != nil {
+		_ = s.showStore.Close()
 	}
 	return s.http.Shutdown(ctx)
 }
@@ -627,6 +642,37 @@ func (s *Server) handleGuestSessionCreate(w http.ResponseWriter, r *http.Request
 	})
 }
 
+func (s *Server) handleGuestSessionList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.adminAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if s.guestStore == nil {
+		http.Error(w, `{"error":"guest store unavailable"}`, http.StatusInternalServerError)
+		return
+	}
+	list, err := s.guestStore.ListActive()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"list guest sessions failed: %s"}`, trimErr(err)), http.StatusInternalServerError)
+		return
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, g := range list {
+		out = append(out, map[string]any{
+			"id":         g.ID,
+			"name":       g.Name,
+			"pin":        g.PIN,
+			"expires_at": g.ExpiresAt,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"sessions": out})
+}
+
 func (s *Server) handleGuestSessionDelete(w http.ResponseWriter, r *http.Request) {
 	if !s.adminAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -799,6 +845,15 @@ func (s *Server) handleRuntimeConfigApply(w http.ResponseWriter, r *http.Request
 			"state":        json.RawMessage(stateRaw),
 			"error":        firstErr(applyErr, stateErr),
 		}
+	}
+
+	if strings.TrimSpace(s.cfg.RouteControlBaseURL) == "" {
+		result["route"] = map[string]any{"ok": true, "skipped": true, "reason": "VBS_ROUTE_CONTROL_BASE_URL 未設定"}
+		routeApplied = true
+	}
+	if strings.TrimSpace(s.cfg.EngineControlBaseURL) == "" {
+		result["engine"] = map[string]any{"ok": true, "skipped": true, "reason": "VBS_ENGINE_CONTROL_BASE_URL 未設定"}
+		engineApplied = true
 	}
 
 	if !routeApplied || !engineApplied {
@@ -1033,6 +1088,26 @@ func (s *Server) attachEngineServiceToken(req *http.Request) {
 		req.Header.Set("Cf-Access-Client-Id", id)
 	}
 	if secret := strings.TrimSpace(s.cfg.EngineAccessClientSecret); secret != "" {
+		req.Header.Set("Cf-Access-Client-Secret", secret)
+	}
+}
+
+func (s *Server) attachCaptureServiceToken(req *http.Request) {
+	if req == nil {
+		return
+	}
+	id := strings.TrimSpace(s.cfg.CaptureAccessClientID)
+	secret := strings.TrimSpace(s.cfg.CaptureAccessClientSecret)
+	if id == "" {
+		id = strings.TrimSpace(s.cfg.EngineAccessClientID)
+	}
+	if secret == "" {
+		secret = strings.TrimSpace(s.cfg.EngineAccessClientSecret)
+	}
+	if id != "" {
+		req.Header.Set("Cf-Access-Client-Id", id)
+	}
+	if secret != "" {
 		req.Header.Set("Cf-Access-Client-Secret", secret)
 	}
 }

@@ -44,6 +44,50 @@ export interface ApplyResult {
   rolled_back: boolean
   message: string
   timestamp: string
+  /** Runtime apply：下游細節（原樣保留供 UI 進階展示） */
+  downstream?: Record<string, unknown>
+}
+
+// ── Show Config（對齊後端 JSON 形狀，snake_case）────────────────────────────────
+export interface ShowConfigPayload {
+  schema_version: string
+  profile: {
+    mode: string
+    target?: {
+      width: number
+      height: number
+      frame_rate: number
+    }
+    hop_overrides?: Record<string, Record<string, unknown>>
+  }
+  sources: Array<{
+    slot_id: string
+    display_name: string
+    short_label?: string
+    group_id?: string
+  }>
+  switcher: {
+    panel_id: string
+    rows: unknown[]
+  }
+  multiview: {
+    template_id: string
+    cells: unknown[]
+  }
+}
+
+export interface ShowConfigState {
+  draft: ShowConfigPayload | null
+  draft_updated_at: number | null
+  effective: ShowConfigPayload | null
+  effective_version: number
+  effective_updated_at: number | null
+}
+
+export interface ShowConfigHistoryRow {
+  version: number
+  applied_at: number
+  downstream_result?: unknown
 }
 
 // ── Switcher 狀態 ─────────────────────────────────────────────────────────────
@@ -85,6 +129,8 @@ export interface OperationLogEntry {
 export interface AppSettings {
   apiBaseUrl: string
   engineBaseUrl: string
+  /** Route HTTP 控制面基底 URL（供客戶端健康檢查 GET …/healthz） */
+  routeBaseUrl: string
   refreshInterval: number // ms
   theme: 'dark' | 'light'
   apiTimeoutMs: number

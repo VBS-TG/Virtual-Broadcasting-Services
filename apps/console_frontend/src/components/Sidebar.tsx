@@ -1,11 +1,25 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import logoTxtImg from '../assets/images/vbslogo-img.svg'
-import { LayoutDashboard, Settings2, MonitorPlay, Activity, ShieldAlert, FileText, Settings, Lock, KeyRound } from 'lucide-react'
+import {
+  LayoutDashboard,
+  Settings2,
+  MonitorPlay,
+  Activity,
+  ShieldAlert,
+  FileText,
+  Settings,
+  Lock,
+  KeyRound,
+  Network,
+  Clapperboard,
+} from 'lucide-react'
 
 const NAV_ITEMS = [
   { path: '/dashboard',   label: 'Dashboard',  icon: LayoutDashboard, desc: '總覽'   },
   { path: '/switcher',    label: 'Switcher',   icon: MonitorPlay,     desc: '導播'   },
+  { path: '/pipeline',    label: 'Pipeline',   icon: Network,         desc: '鏈路'   },
+  { path: '/show-config', label: 'Show',       icon: Clapperboard,    desc: '演出'   },
   { path: '/runtime',     label: 'Runtime',    icon: Settings2,       desc: '配置',  adminOnly: true },
   { path: '/rental-sessions', label: 'Rentals', icon: KeyRound,       desc: '租賃',  adminOnly: true },
   { path: '/telemetry',   label: 'Telemetry',  icon: Activity,        desc: '遙測'   },

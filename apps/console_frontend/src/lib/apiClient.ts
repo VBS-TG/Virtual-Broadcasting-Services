@@ -1,4 +1,12 @@
-import type { RuntimeConfig, ApplyResult, SwitchState, TelemetryLatest } from '../types'
+import type {
+  RuntimeConfig,
+  ApplyResult,
+  SwitchState,
+  TelemetryLatest,
+  ShowConfigPayload,
+  ShowConfigState,
+  ShowConfigHistoryRow,
+} from '../types'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useAuthStore } from '../stores/authStore'
 
@@ -185,16 +193,34 @@ function parseRuntimeConfig(payload: any): RuntimeConfig {
   }
 }
 
+function nodeApplyOK(block: unknown): boolean {
+  if (block == null) return true
+  if (typeof block !== 'object' || block === null) return Boolean(block)
+  const o = block as Record<string, unknown>
+  if (o.skipped === true) return true
+  return Boolean(o.ok)
+}
+
 function parseApplyResult(payload: any): ApplyResult {
-  const routeOK = Boolean(payload?.route?.ok)
-  const engineOK = Boolean(payload?.engine?.ok)
-  const rolled = Boolean(payload?.rolled_back && Object.keys(payload.rolled_back).length > 0)
+  const routeOK = nodeApplyOK(payload?.route)
+  const engineOK = nodeApplyOK(payload?.engine)
+  const rolledRaw = payload?.rolled_back
+  let rolledBack = false
+  if (rolledRaw && typeof rolledRaw === 'object' && !Array.isArray(rolledRaw)) {
+    rolledBack = Object.values(rolledRaw as Record<string, boolean>).some(Boolean)
+  }
+  const t = Number(payload?.applied_at ?? 0) || Math.floor(Date.now() / 1000)
+  const parts: string[] = []
+  if (!routeOK) parts.push('Route 節點套用失敗')
+  if (!engineOK) parts.push('Engine 節點套用失敗')
+  if (rolledBack) parts.push('已嘗試回滾上一版設定')
   return {
     route: routeOK,
     engine: engineOK,
-    rolled_back: rolled,
-    message: routeOK && engineOK ? 'Applied' : 'Apply partially failed',
-    timestamp: new Date((Number(payload?.applied_at ?? 0) || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+    rolled_back: rolledBack,
+    message: parts.length ? parts.join('；') : '套用完成',
+    timestamp: new Date(t * 1000).toISOString(),
+    downstream: typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : undefined,
   }
 }
 
@@ -360,6 +386,89 @@ export async function deleteGuestSession(id: string): Promise<ApiResponse<{ dele
       deleted: Boolean(data.deleted),
     },
   }
+}
+
+export async function listGuestSessions(): Promise<ApiResponse<GuestSessionRecord[]>> {
+  const res = await request<any>('GET', '/api/v1/guest/sessions')
+  if (res.error) return res as ApiResponse<GuestSessionRecord[]>
+  
+  const data = Array.isArray(res.data?.sessions) ? res.data.sessions : []
+  return {
+    ...res,
+    data: data.map((d: any) => ({
+      id: String(d.id ?? ''),
+      name: String(d.name ?? ''),
+      pin: String(d.pin ?? ''),
+      expires_at: Number(d.expires_at ?? 0),
+      access_token: d.access_token ? String(d.access_token) : undefined,
+      token_type: d.token_type ? String(d.token_type) : undefined,
+      magic_link: d.magic_link ? String(d.magic_link) : undefined,
+    }))
+  }
+}
+
+export function defaultShowConfigDraft(): ShowConfigPayload {
+  return {
+    schema_version: '1.0',
+    profile: {
+      mode: 'pipeline_locked',
+      target: { width: 1920, height: 1080, frame_rate: 60 },
+    },
+    sources: [],
+    switcher: { panel_id: 'main_atem_like', rows: [] },
+    multiview: { template_id: 'grid_4x4', cells: [] },
+  }
+}
+
+export async function getShowConfig(): Promise<ApiResponse<ShowConfigState>> {
+  const res = await request<any>('GET', '/api/v1/show-config')
+  if (res.error || !res.data) return res as ApiResponse<ShowConfigState>
+  const d = res.data
+  return {
+    ...res,
+    data: {
+      draft: (d.draft ?? null) as ShowConfigPayload | null,
+      draft_updated_at: d.draft_updated_at != null ? Number(d.draft_updated_at) : null,
+      effective: (d.effective ?? null) as ShowConfigPayload | null,
+      effective_version: Number(d.effective_version ?? 0),
+      effective_updated_at: d.effective_updated_at != null ? Number(d.effective_updated_at) : null,
+    },
+  }
+}
+
+export async function putShowConfigDraft(cfg: ShowConfigPayload): Promise<
+  ApiResponse<{ saved: boolean; draft: ShowConfigPayload; draft_updated_at?: number }>
+> {
+  return request('PUT', '/api/v1/show-config/draft', cfg)
+}
+
+export interface ShowConfigApplyResponse {
+  ok?: boolean
+  effective?: ShowConfigPayload
+  effective_version?: number
+  effective_updated_at?: number
+  downstream?: unknown
+  message?: string
+}
+
+export async function postShowConfigApply(): Promise<ApiResponse<ShowConfigApplyResponse>> {
+  return request('POST', '/api/v1/show-config/apply')
+}
+
+export async function postShowConfigRollback(): Promise<ApiResponse<ShowConfigApplyResponse>> {
+  return request('POST', '/api/v1/show-config/rollback')
+}
+
+export async function getShowConfigHistory(limit = 50): Promise<ApiResponse<{ history: ShowConfigHistoryRow[] }>> {
+  const res = await request<any>('GET', `/api/v1/show-config/history?limit=${encodeURIComponent(String(limit))}`)
+  if (res.error) return res as ApiResponse<{ history: ShowConfigHistoryRow[] }>
+  const rows = Array.isArray(res.data?.history) ? res.data.history : []
+  const history: ShowConfigHistoryRow[] = rows.map((r: any) => ({
+    version: Number(r.version ?? 0),
+    applied_at: Number(r.applied_at ?? 0),
+    downstream_result: r.downstream_result,
+  }))
+  return { ...res, data: { history } }
 }
 
 export async function checkHealth(url: string): Promise<{

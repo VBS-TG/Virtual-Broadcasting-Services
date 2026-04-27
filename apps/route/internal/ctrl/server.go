@@ -3,9 +3,11 @@ package ctrl
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -19,6 +21,7 @@ import (
 	"vbs/apps/route/internal/rtstate"
 	"vbs/apps/route/internal/srtla"
 	"vbs/apps/route/internal/telemetry"
+	"vbs/pkg/showconfig"
 )
 
 type relaySession struct {
@@ -62,7 +65,7 @@ func (s *relayRouteStore) snapshot() map[string]string {
 	return out
 }
 
-// Start 啟動 Route 控制面 HTTP 服務（健康檢查、SRT 緩衝參數熱更新）。非資料平面，須搭配防火牆與 Bearer JWT。
+// Start 啟動 Route 控制面 HTTP 服務（健康檢查、SRT 緩衝參數熱更新）。非資料平面；須防火牆隔離，授權為 Cf-Access-Client-Id/Secret（與本節點 VBS_CF_ACCESS_* 一致）或 Cf-Access-Jwt-Assertion。
 func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restart chan<- struct{}, logger *log.Logger, auth *consoleauth.Provider, pipeline *srtla.Pipeline, collector *telemetry.IngestCollector) {
 	if logger == nil {
 		logger = log.Default()
@@ -74,8 +77,10 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 
 	routeStore := newRelayRouteStore()
 	runtimeMu := sync.RWMutex{}
+	inputCount := 8
 	auxCount := 4
 	pgmCount := 1
+	const maxShowConfigBodyBytes = 512 << 10
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +199,7 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 		}
 		runtimeMu.RLock()
 		resp := map[string]any{
-			"inputs":    8,
+			"inputs":    inputCount,
 			"pgm_count": pgmCount,
 			"aux_count": auxCount,
 		}
@@ -235,6 +240,7 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 			return
 		}
 		runtimeMu.Lock()
+		inputCount = body.Inputs
 		pgmCount = body.PGMCount
 		auxCount = body.AUXCount
 		runtimeMu.Unlock()
@@ -246,6 +252,43 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 				"pgm_count": body.PGMCount,
 				"aux_count": body.AUXCount,
 			},
+		})
+	})
+
+	mux.HandleFunc("/api/v1/show-config/apply", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizedControlPlane(r, cfg, auth) {
+			logger.Printf("[route][ctrl] 未授權的 API 請求 remote=%s path=%s", r.RemoteAddr, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		raw, err := io.ReadAll(io.LimitReader(r.Body, maxShowConfigBodyBytes))
+		if err != nil {
+			http.Error(w, "read body", http.StatusBadRequest)
+			return
+		}
+		var cfgShow showconfig.ShowConfig
+		if err := json.Unmarshal(raw, &cfgShow); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		showconfig.Normalize(&cfgShow)
+		runtimeMu.RLock()
+		nIn := inputCount
+		runtimeMu.RUnlock()
+		if err := showconfig.Validate(cfgShow, nIn); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		logger.Printf("[route][ctrl] show-config applied inputs=%d panel=%s sources=%d", nIn, cfgShow.Switcher.PanelID, len(cfgShow.Sources))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"applied": true,
+			"node":    "route",
+			"inputs":  nIn,
 		})
 	})
 
@@ -397,6 +440,11 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 }
 
 func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleauth.Provider) bool {
+	// 1) Cloudflare Access Service Token（Console Orchestrator / M2M 全自動，無需人工 JWT）
+	if matchInboundAccessServiceToken(r, cfg) {
+		return true
+	}
+	// 2) Cf-Access-Jwt-Assertion（人員或已注入 JWT 的請求）
 	got := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion"))
 	if got == "" {
 		return false
@@ -410,6 +458,26 @@ func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleaut
 	}
 	role := strings.TrimSpace(strings.ToLower(claims.Role))
 	return role == "node"
+}
+
+// matchInboundAccessServiceToken 比對節點上設定之 Access Service Token；須與 Console 端
+// VBS_ROUTE_ACCESS_CLIENT_ID / SECRET（呼叫 Route 時）一致，部署一次後即自動化。
+func matchInboundAccessServiceToken(r *http.Request, cfg config.Config) bool {
+	wantID := strings.TrimSpace(cfg.CFAccessClientID)
+	wantSecret := strings.TrimSpace(cfg.CFAccessClientSecret)
+	if wantID == "" || wantSecret == "" {
+		return false
+	}
+	gotID := strings.TrimSpace(r.Header.Get("Cf-Access-Client-Id"))
+	gotSecret := strings.TrimSpace(r.Header.Get("Cf-Access-Client-Secret"))
+	if gotID == "" || gotSecret == "" {
+		return false
+	}
+	if len(gotID) != len(wantID) || len(gotSecret) != len(wantSecret) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(gotID), []byte(wantID)) == 1 &&
+		subtle.ConstantTimeCompare([]byte(gotSecret), []byte(wantSecret)) == 1
 }
 
 func randomHex(n int) string {

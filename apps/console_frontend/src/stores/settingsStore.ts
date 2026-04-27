@@ -7,6 +7,7 @@ const DEFAULT: AppSettings = {
   // Production API domain: vbsapi.cyblisswisdom.org
   apiBaseUrl: 'https://vbsapi.cyblisswisdom.org',
   engineBaseUrl: 'https://vbsswitcher.cyblisswisdom.org',
+  routeBaseUrl: '',
   refreshInterval: 1000,
   theme: 'dark',
   apiTimeoutMs: 10000,

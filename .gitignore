@@ -19,3 +19,4 @@ apps/console_frontend/*.local
 # apps/engine Dependencies and Build outputs
 apps/engine/node_modules
 apps/engine/dist
+

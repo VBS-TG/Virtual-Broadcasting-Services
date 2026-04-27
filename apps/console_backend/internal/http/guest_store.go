@@ -80,6 +80,30 @@ func (s *guestStore) GetByPIN(pin string) (*guestSession, error) {
 	return &out, nil
 }
 
+// ListActive returns non-revoked sessions that have not yet expired (newest first).
+func (s *guestStore) ListActive() ([]guestSession, error) {
+	now := time.Now().UTC().Unix()
+	rows, err := s.db.Query(
+		`SELECT id, name, pin, session_version, revoked, created_at, expires_at FROM guest_sessions WHERE revoked=0 AND expires_at > ? ORDER BY created_at DESC`,
+		now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []guestSession
+	for rows.Next() {
+		var g guestSession
+		var revoked int
+		if err := rows.Scan(&g.ID, &g.Name, &g.PIN, &g.SessionVersion, &revoked, &g.CreatedAt, &g.ExpiresAt); err != nil {
+			return nil, err
+		}
+		g.Revoked = revoked == 1
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 func (s *guestStore) ValidateTokenSession(id string, sessionVersion int) bool {
 	if id == "" {
 		return false

@@ -53,7 +53,8 @@
 | Route-SRT-Internal / 20021 | UDP/SRT | 本機 127.0.0.1 | — | Route 內部 |
 | Route-SRT-Out / 20030 | UDP/SRT | `srt://<DNS 或域名>:20030` Listener | —（媒體層 passphrase） | Route → Engine |
 | Route-Telemetry | WSS | 由 `VBS_CONSOLE_BASE_URL` + `VBS_ROUTE_TELEMETRY_WS_PATH` 衍生之 `wss://…` | `Authorization: Bearer <Cloudflare Access JWT>` **或** `Cf-Access-Client-Id/Secret` | Route → Console Hub |
-| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | `/healthz` 無；其餘 `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發；需通過本地映射為 admin/operator） | Console / 維運 → Route |
+| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | `/healthz` 無；其餘 **`Cf-Access-Client-Id`／`Cf-Access-Client-Secret`**（與節點 `VBS_CF_ACCESS_*` 一致）**或** `Cf-Access-Jwt-Assertion`／Bearer JWT（映射為 admin/operator） | Console orchestrator／維運 → Route |
+| Route-Control-HTTP | HTTP | `POST /api/v1/show-config/apply` | 同上（Orchestrator 自動附 Service Token） | Console orchestrator → Route |
 
 ### Route-Telemetry Payload
 
@@ -140,6 +141,7 @@ Engine 節點採 **Eyevinn Open Live 官方核心 + 本專案 Adapter**。
 - `GET /api/v1/switch/state`：查目前 Program/Preview/AUX 狀態。
 - `GET /api/v1/runtime/config`：查 Engine 當前 Runtime 配置（inputs/pgm_count/aux_count）。
 - `POST /api/v1/runtime/config/apply`：套用 Runtime 配置（body 範例：`{"inputs":8,"pgm_count":1,"aux_count":4,"input_sources":["srt://..."],"aux_sources":{"1":"input1"}}`），由 adapter 轉譯到 Open Live（或 Strom 備援）官方配置格式。
+- `POST /api/v1/show-config/apply`：套用 Show Config（body 與 `packages/shared/schemas/show-config.v1.schema.json`／`pkg/showconfig` 一致）；驗證後由 adapter 記錄並回傳 `applied`（後續可擴充：來源顯示名同步至 Open Live sources 等）。
 
 ### 部署
 
@@ -173,8 +175,16 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 | `VBS_CONSOLE_HTTP_BIND` | 否 | 預設 `:4000`。 |
 | `VBS_CONSOLE_TELEMETRY_MAX_BYTES` | 否 | 單筆 WS 訊息上限，預設 `255`（與 1Hz／≤255B 規範一致）。 |
 | `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC` | 否 | 節點離線判定秒數，預設 `10`（最小 `3`）。 |
+| `VBS_RUNTIME_DB_PATH` | 否 | Runtime 快照 SQLite 路徑，預設 `data/console-runtime.db`。 |
+| `VBS_SHOW_CONFIG_DB_PATH` | 否 | Show Config（製作規格）SQLite 路徑，預設 `data/console-show-config.db`。 |
+| `VBS_ROUTE_CONTROL_BASE_URL` | 否 | Route 控制面基底 URL（Console orchestrator 轉發）；未設定時 Runtime／Show Config 之下發該跳為 skip。 |
+| `VBS_ENGINE_CONTROL_BASE_URL` | 否 | Engine adapter 控制面基底 URL；未設定時對應之下發為 skip。 |
+| `VBS_ROUTE_ACCESS_CLIENT_ID` / `VBS_ROUTE_ACCESS_CLIENT_SECRET` | 否 | Console → Route M2M（Cf-Access-Client-*）；未設定則請求無 Service Token（依部署而定）。 |
+| `VBS_ENGINE_ACCESS_CLIENT_ID` / `VBS_ENGINE_ACCESS_CLIENT_SECRET` | 否 | Console → Engine M2M；同上。 |
+| `VBS_CAPTURE_CONTROL_BASE_URL` | 否 | Capture 控制面基底 URL（Show Config apply／rollback 轉發）；未設定則該跳 skip。 |
+| `VBS_CAPTURE_ACCESS_CLIENT_ID` / `VBS_CAPTURE_ACCESS_CLIENT_SECRET` | 否 | Console → Capture M2M；若留空則套用時退回使用 **Engine** 之 Client Id/Secret（便於同區 Cloudflare Service Token）。 |
 
-> 配置邊界：`.env` 僅承載固定基礎參數（安全、定位、資源上限）；當天活動配置（IN 路數、PGM/AUX 路數、來源綁定）應由 Console Runtime API 下發與熱更新，不應依賴改 `.env` 重啟。
+> 配置邊界：`.env` 僅承載固定基礎參數（安全、定位、資源上限）；當天活動配置（IN 路數、PGM/AUX 路數、來源綁定）應由 Console Runtime API 下發與熱更新；**製作規格（Show Config：畫質政策、來源名、Switcher／Multiview 編排）**由 Show Config API 持久化與套用，**同樣不得**依賴改 `.env` 手動覆寫。
 
 ### 服務表（Console）
 
@@ -188,6 +198,29 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 | Console-HTTP / 4000 | HTTP | `GET /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin/operator） | 讀取今日 Runtime 配置 |
 | Console-HTTP / 4000 | HTTP | `PUT /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin） | 儲存今日 Runtime 配置 |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/runtime/config/apply` | `Authorization: Bearer <JWT>`（admin） | 以 staged apply 下發至 Route/Engine（失敗回退） |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/show-config` | `Authorization: Bearer <JWT>`（admin／operator） | 讀取 Show Config **draft**、**effective** 與版本時間戳 |
+| Console-HTTP / 4000 | HTTP | `PUT /api/v1/show-config/draft` | `Authorization: Bearer <JWT>`（admin／operator） | 儲存草稿（body 為完整 Show Config JSON；須與目前 `runtime.config.inputs` 交叉驗證） |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/show-config/apply` | `Authorization: Bearer <JWT>`（admin） | 依序嘗試 **Capture／Route／Engine** `POST /api/v1/show-config/apply`（若該基底 URL 未設定則 skip）；**全部成功或 skip** 後才將 draft 設為 Console **effective** 並寫入 history |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/show-config/rollback` | `Authorization: Bearer <JWT>`（admin） | 以上一版 history 快照回滾 effective，並再次轉發各節點 `POST /api/v1/show-config/apply` |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/show-config/history?limit=50` | `Authorization: Bearer <JWT>`（admin／operator） | 列出套用紀錄（version、applied_at、downstream_result） |
+
+### Show Config（節點契約，待各節點實作）
+
+- **Console → 節點**：`POST /api/v1/show-config/apply`  
+  - **Headers**：`Content-Type: application/json`；**必須**與下節「M2M Service Token」一致，附帶 `Cf-Access-Client-Id` / `Cf-Access-Client-Secret`（Console 已於 Orchestrator 自動附加）。  
+  - **Body**：與 `packages/shared/schemas/show-config.v1.schema.json` 一致之 **Show Config JSON 本體**（與 Console `PUT /api/v1/show-config/draft` 相同形狀）。  
+  - **成功**：HTTP 2xx；**失敗**：Console 不更新 effective（apply），rollback 時亦全失敗則不更新。  
+- **節點未實作前**：請將對應之 `VBS_*_CONTROL_BASE_URL` **留空**，Console 僅在本地套用 effective／history（不下發 HTTP）。
+
+### Console ↔ Route／Engine 控制面 M2M（免手動 JWT）
+
+- **目的**：Orchestrator（Console 後端）對 Route／Engine 的 **Runtime apply、Show Config apply** 等請求，只應依賴 **環境變數內已配置的 Cloudflare Access Service Token**，不需人工複製 `Cf-Access-Jwt-Assertion`。
+- **Console 端**：使用既有 `VBS_ROUTE_ACCESS_CLIENT_ID`／`SECRET`、`VBS_ENGINE_ACCESS_CLIENT_ID`／`SECRET`（見 `apps/console_backend/internal/config`），請求時自動帶入 **`Cf-Access-Client-Id`**、**`Cf-Access-Client-Secret`**。
+- **Route／Engine 端**：控制面除驗證 **`Cf-Access-Jwt-Assertion`**（JWT）外，另支援 **與本節點 `VBS_CF_ACCESS_CLIENT_ID`／`VBS_CF_ACCESS_CLIENT_SECRET` 完全一致**（常數時間比對）之 Service Token；通過即視為已授權（與 Console 對該節點設定的 Access 憑證為 **同一組** 即可）。
+- **部署約定（上線一次即可）**：  
+  - Route 容器：`VBS_CF_ACCESS_CLIENT_ID`／`SECRET` **＝** Console 的 **`VBS_ROUTE_ACCESS_CLIENT_ID`／`SECRET`**（呼叫 Route 控制面專用 Token）。  
+  - Engine 容器：`VBS_CF_ACCESS_CLIENT_ID`／`SECRET` **＝** Console 的 **`VBS_ENGINE_ACCESS_CLIENT_ID`／`SECRET`**。  
+  - 節點對 Console 遙測出站若沿用同一組 Token，無需額外人工步驟。
 
 ### JWT（ZTA）
 
@@ -211,6 +244,7 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 - `packages/shared/schemas/node-status.v1.schema.json`
 - `packages/shared/schemas/console-telemetry-latest.v1.schema.json`（Console `GET /api/v1/telemetry/latest` 回應快照，MVP-A）
 - `packages/shared/schemas/control.engine-switch.v1.schema.json`
+- `packages/shared/schemas/show-config.v1.schema.json`（Show Config／製作規格）
 
 新增或修改跨節點封包時，必須先更新上述 schema，再更新各節點實作。
 
