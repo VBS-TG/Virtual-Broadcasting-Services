@@ -129,7 +129,7 @@ export default function Switcher({ compact, fullScreen }: SwitcherProps) {
   const [transitioning, setTransitioning] = useState(false)
   const [ftbOn, setFtbOn] = useState(false)
   const [autoRate, setAutoRate] = useState('01:00')
-  const [ftbRate, setFtbRate] = useState('01:00')
+  const [ftbRate] = useState('01:00')
   const [lastOp, setLastOp] = useState<{ time: string; payload: any; error?: string } | null>(null)
   const rafRef = useRef<number | null>(null)
   const cooldown = useRef(false)
