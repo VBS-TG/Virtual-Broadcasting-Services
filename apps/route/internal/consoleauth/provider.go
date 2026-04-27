@@ -1,15 +1,11 @@
 package consoleauth
 
 import (
-	"bytes"
-	"crypto/ed25519"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -25,10 +21,7 @@ import (
 
 type Claims struct {
 	Role           string `json:"role"`
-	Scope          string `json:"scope"`
-	Email          string `json:"email"`
 	CommonName     string `json:"common_name"`
-	SessionVersion int    `json:"sv"`
 	jwt.RegisteredClaims
 }
 
@@ -37,10 +30,7 @@ type Provider struct {
 	client        http.Client
 	cfIssuer      string
 	aud           string
-	adminEmails   map[string]struct{}
 	nodeCNPrefix  string
-	consoleIssuer string
-	consolePubKeys []ed25519.PublicKey
 
 	mu        sync.RWMutex
 	keys      map[string]any
@@ -57,16 +47,6 @@ func NewProvider(cfg config.Config) *Provider {
 			issuer = "https://" + td
 		}
 	}
-	adminSet := map[string]struct{}{}
-	for _, e := range cfg.AdminEmails {
-		adminSet[strings.TrimSpace(strings.ToLower(e))] = struct{}{}
-	}
-	pubs := make([]ed25519.PublicKey, 0, len(cfg.ConsoleJWTPublicKeys))
-	for _, k := range cfg.ConsoleJWTPublicKeys {
-		if pub, err := parseEd25519PublicKey(k); err == nil {
-			pubs = append(pubs, pub)
-		}
-	}
 	return &Provider{
 		cfg: cfg,
 		client: http.Client{
@@ -74,10 +54,7 @@ func NewProvider(cfg config.Config) *Provider {
 		},
 		cfIssuer: issuer,
 		aud:      cfg.CFAccessAUD,
-		adminEmails: adminSet,
 		nodeCNPrefix: strings.TrimSpace(strings.ToLower(cfg.NodeCNPrefix)),
-		consoleIssuer: strings.TrimSpace(cfg.ConsoleJWTIssuer),
-		consolePubKeys: pubs,
 		keys: map[string]any{},
 	}
 }
@@ -85,10 +62,6 @@ func NewProvider(cfg config.Config) *Provider {
 func (p *Provider) ApplyAccessHeaders(header http.Header) error {
 	if header == nil {
 		return fmt.Errorf("nil header")
-	}
-	if jwt := strings.TrimSpace(p.cfg.CFAccessJWT); jwt != "" {
-		header.Set("Authorization", "Bearer "+jwt)
-		return nil
 	}
 	clientID := strings.TrimSpace(p.cfg.CFAccessClientID)
 	clientSecret := strings.TrimSpace(p.cfg.CFAccessClientSecret)
@@ -102,14 +75,6 @@ func (p *Provider) ApplyAccessHeaders(header http.Header) error {
 
 func (p *Provider) VerifyBearer(raw string) (*Claims, error) {
 	raw = strings.TrimSpace(raw)
-	var claims Claims
-	_, _, err := new(jwt.Parser).ParseUnverified(raw, &claims)
-	if err != nil {
-		return nil, err
-	}
-	if strings.EqualFold(strings.TrimSpace(claims.Issuer), p.consoleIssuer) {
-		return p.verifyConsoleBearer(raw)
-	}
 	return p.verifyCloudflareBearer(raw)
 }
 
@@ -132,86 +97,14 @@ func (p *Provider) verifyCloudflareBearer(raw string) (*Claims, error) {
 	if !parsed.Valid {
 		return nil, fmt.Errorf("invalid token")
 	}
-	claims.Role = p.mapCloudflareRole(strings.TrimSpace(strings.ToLower(claims.Email)), strings.TrimSpace(strings.ToLower(claims.CommonName)))
+	claims.Role = p.mapCloudflareRole(strings.TrimSpace(strings.ToLower(claims.CommonName)))
 	if claims.Role == "" {
 		return nil, fmt.Errorf("identity not allowed")
 	}
 	return &claims, nil
 }
 
-func (p *Provider) verifyConsoleBearer(raw string) (*Claims, error) {
-	var lastErr error
-	for _, pub := range p.consolePubKeys {
-		var claims Claims
-		parsed, err := jwt.ParseWithClaims(raw, &claims, func(token *jwt.Token) (any, error) {
-			return pub, nil
-		}, jwt.WithIssuer(p.consoleIssuer), jwt.WithAudience(p.aud))
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if !parsed.Valid {
-			lastErr = fmt.Errorf("invalid token")
-			continue
-		}
-		if strings.TrimSpace(strings.ToLower(claims.Role)) == "" {
-			lastErr = fmt.Errorf("missing role")
-			continue
-		}
-		role := strings.TrimSpace(strings.ToLower(claims.Role))
-		if role == "operator" {
-			guestID := strings.TrimPrefix(strings.TrimSpace(claims.Subject), "guest:")
-			if guestID == "" || !p.introspectGuest(guestID, claims.SessionVersion) {
-				lastErr = fmt.Errorf("guest session revoked")
-				continue
-			}
-		}
-		return &claims, nil
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("console token verification failed")
-	}
-	return nil, lastErr
-}
-
-func (p *Provider) introspectGuest(guestID string, sessionVersion int) bool {
-	base := strings.TrimRight(strings.TrimSpace(p.cfg.ConsoleBaseURL), "/")
-	if base == "" {
-		return false
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"guest_id": guestID,
-		"session_version": sessionVersion,
-	})
-	req, err := http.NewRequest(http.MethodPost, base+"/api/v1/guest/introspect", bytes.NewReader(payload))
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if err := p.ApplyAccessHeaders(req.Header); err != nil {
-		return false
-	}
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return false
-	}
-	var out struct {
-		Active bool `json:"active"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return false
-	}
-	return out.Active
-}
-
-func (p *Provider) mapCloudflareRole(email, commonName string) string {
-	if _, ok := p.adminEmails[email]; ok {
-		return "admin"
-	}
+func (p *Provider) mapCloudflareRole(commonName string) string {
 	if strings.HasPrefix(commonName, p.nodeCNPrefix) {
 		return "node"
 	}
@@ -354,31 +247,3 @@ func decodeBase64URL(raw string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
 }
 
-func parseEd25519PublicKey(raw string) (ed25519.PublicKey, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, fmt.Errorf("empty key")
-	}
-	if block, _ := pem.Decode([]byte(raw)); block != nil {
-		key, err := x509.ParsePKIXPublicKey(block.Bytes)
-		if err != nil {
-			return nil, err
-		}
-		ed, ok := key.(ed25519.PublicKey)
-		if !ok {
-			return nil, fmt.Errorf("not ed25519 key")
-		}
-		return ed, nil
-	}
-	buf, err := base64.RawStdEncoding.DecodeString(raw)
-	if err != nil {
-		buf, err = base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(buf) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid ed25519 key length")
-	}
-	return ed25519.PublicKey(buf), nil
-}

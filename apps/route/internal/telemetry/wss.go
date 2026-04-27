@@ -13,7 +13,7 @@ import (
 	"vbs/apps/route/internal/consoleauth"
 )
 
-// WSSClient 以 WebSocket 將遙測送往 Console Hub（Header: Authorization Bearer）。
+// WSSClient 以 WebSocket 將遙測送往 Console Hub（Header: Cloudflare Service Token）。
 type WSSClient struct {
 	cfg    config.Config
 	dialer websocket.Dialer

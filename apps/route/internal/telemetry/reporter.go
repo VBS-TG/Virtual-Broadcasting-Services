@@ -103,7 +103,7 @@ func collectMetrics(cfg config.Config, ingestMbps float64, s srtla.Stats) Teleme
 			"reorder_error_pct": reorderErrPct,
 			"has_engine_client": hasEngineClient,
 		},
-		AuthMode: "cf_jwt",
+		AuthMode: "cf_service_token",
 	}
 }
 
