@@ -3,8 +3,9 @@ import { persist } from 'zustand/middleware'
 import type { AppSettings } from '../types'
 
 const DEFAULT: AppSettings = {
-  // Formal deployment should use same-origin reverse proxy for /api.
-  apiBaseUrl: '',
+  // Production frontend domain: vbs.cyblisswisdom.org
+  // Production API domain: vbsapi.cyblisswisdom.org
+  apiBaseUrl: 'https://vbsapi.cyblisswisdom.org',
   engineBaseUrl: 'https://vbsswitcher.cyblisswisdom.org',
   refreshInterval: 1000,
   theme: 'dark',
