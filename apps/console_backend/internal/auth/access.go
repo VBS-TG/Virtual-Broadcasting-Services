@@ -137,6 +137,19 @@ func (v *AccessJWTVerifier) VerifyRequest(r *http.Request) (*AccessClaims, error
 	return v.VerifyBearer(r.Header.Get("Authorization"))
 }
 
+// VerifyRequestPreferBearer prioritizes application-layer bearer tokens.
+// This is used by Console control/admin authorization to avoid Cloudflare
+// service-token identity overshadowing a valid admin/operator bearer token.
+func (v *AccessJWTVerifier) VerifyRequestPreferBearer(r *http.Request) (*AccessClaims, error) {
+	if claims, err := v.VerifyBearer(r.Header.Get("Authorization")); err == nil {
+		return claims, nil
+	}
+	if cfJWT := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion")); cfJWT != "" {
+		return v.VerifyToken(cfJWT)
+	}
+	return v.VerifyBearer(r.Header.Get("Authorization"))
+}
+
 func (v *AccessJWTVerifier) VerifyBearer(header string) (*AccessClaims, error) {
 	header = strings.TrimSpace(header)
 	if !strings.HasPrefix(strings.ToLower(header), "bearer ") {

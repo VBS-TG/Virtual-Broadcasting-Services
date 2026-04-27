@@ -263,7 +263,7 @@ func (s *Server) handleSessionKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminAuthorized(r *http.Request) bool {
-	claims, err := s.access.VerifyRequest(r)
+	claims, err := s.access.VerifyRequestPreferBearer(r)
 	if err != nil {
 		return false
 	}
@@ -271,7 +271,7 @@ func (s *Server) adminAuthorized(r *http.Request) bool {
 }
 
 func (s *Server) controlAuthorized(r *http.Request) bool {
-	claims, err := s.access.VerifyRequest(r)
+	claims, err := s.access.VerifyRequestPreferBearer(r)
 	if err != nil {
 		return false
 	}
