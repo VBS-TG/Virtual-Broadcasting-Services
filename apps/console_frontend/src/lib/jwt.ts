@@ -69,8 +69,8 @@ export function validateAccessToken(rawInput: string): TokenValidationResult {
   }
 
   const roleRaw = String(payload.role ?? '').toLowerCase()
-  if (roleRaw !== 'admin' && roleRaw !== 'operator') {
-    return { ok: false, error: 'Token 角色不符，僅接受 admin/operator' }
+  if (roleRaw !== 'admin' && roleRaw !== 'guest') {
+    return { ok: false, error: 'Token 角色不符，僅接受 admin/guest' }
   }
   const role = roleRaw as UserRole
   return { ok: true, token, payload, role }

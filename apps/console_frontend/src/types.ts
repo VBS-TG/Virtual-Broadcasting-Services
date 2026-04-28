@@ -10,7 +10,7 @@ export type PageKey =
   | 'settings'
 
 // ── 角色 ──────────────────────────────────────────────────────────────────────
-export type UserRole = 'admin' | 'operator'
+export type UserRole = 'admin' | 'guest'
 
 // ── 登入使用者 ────────────────────────────────────────────────────────────────
 export interface AuthUser {

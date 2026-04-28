@@ -106,7 +106,6 @@ func New(cfg *config.Config) *Server {
 		}
 	}
 	access, err := auth.NewAccessJWTVerifier(
-		cfg.CFAccessMode,
 		cfg.CFAccessTeamDomain,
 		cfg.CFAccessAUD,
 		cfg.CFAccessJWKSURL,
@@ -137,7 +136,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		if origin != "" && s.isAllowedOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Cf-Access-Jwt-Assertion")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Add("Vary", "Origin")
 		}
@@ -163,6 +162,7 @@ func (s *Server) isAllowedOrigin(origin string) bool {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /api/v1/auth/session", s.handleAuthSession)
 	s.mux.HandleFunc("POST /api/v1/auth/admin/email-login", s.handleAdminEmailLogin)
 	s.mux.HandleFunc("GET /vbs/telemetry/ws", s.handleTelemetryWS)
 	s.mux.HandleFunc("GET /vbs/telemetry/events/ws", s.handleTelemetryEventsWS)
@@ -231,6 +231,42 @@ func (s *Server) handleAdminEmailLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAuthSession returns current authenticated session role for UI gating.
+// It prefers application bearer token first (admin/guest), then Cf-Access JWT.
+func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	claims, err := s.access.VerifyRequestPreferBearer(r)
+	if err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	role := strings.TrimSpace(strings.ToLower(claims.Role))
+	if role != "admin" && role != "guest" {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
+	active := true
+	if role == "guest" {
+		guestID := strings.TrimPrefix(strings.TrimSpace(claims.Subject), "guest:")
+		active = s.guestStore != nil && s.guestStore.ValidateTokenSession(guestID, claims.SessionVersion)
+		if !active {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":      true,
+		"role":    role,
+		"subject": strings.TrimSpace(claims.Subject),
+		"active":  active,
+		"email":   strings.TrimSpace(claims.Email),
+	})
+}
+
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe() error {
 	log.Printf("console-server listening on %s", s.cfg.ListenAddr)
@@ -293,7 +329,7 @@ func (s *Server) controlAuthorized(r *http.Request) bool {
 	if !auth.CanControlPlane(claims.Role) {
 		return false
 	}
-	if claims.Role == "operator" {
+	if auth.IsGuestRole(claims.Role) {
 		guestID := strings.TrimPrefix(strings.TrimSpace(claims.Subject), "guest:")
 		return s.guestStore.ValidateTokenSession(guestID, claims.SessionVersion)
 	}

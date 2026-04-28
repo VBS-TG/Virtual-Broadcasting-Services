@@ -1,12 +1,11 @@
-# Console 部署與驗證（ZTA / Cloudflare JWT-only）
+# Console 部署與驗證（ZTA / Human-Machine Separation）
 
-本文件只適用於新版 ZTA：**所有 API 與 WS 一律使用 Cloudflare Access JWT**，Console 不再提供 `register` / `refresh` / `token mint` 端點。
+本文件對齊發布版：Console 前台只走同源 API，Console 後端負責人機分離與節點編排。
 
 ## 前置
 
 - 於 repo 根目錄建立 `.env.console`（Compose 會自動載入）。
 - 至少設定：
-  - `VBS_CF_ACCESS_MODE=jwt`
   - `VBS_CF_ACCESS_AUD=<cloudflare-access-audience>`
   - `VBS_CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com`（或改填 `VBS_CF_ACCESS_JWKS_URL`）
 - 建議設定：
@@ -27,20 +26,21 @@ curl -sS http://127.0.0.1:5000/healthz
 # 預期：{"status":"ok"}
 ```
 
-## 3) 驗證管理端查詢（admin JWT）
+## 3) 驗證管理端查詢（admin/guest JWT）
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/v1/telemetry/latest \
-  -H "Authorization: Bearer <cloudflare-access-jwt-with-role-admin>"
+  -H "Authorization: Bearer <access-or-console-jwt>"
 ```
 
 成功時回傳每個節點最新遙測與 `presence` 狀態。
 
-## 4) 驗證節點遙測上報（node JWT）
+## 4) 驗證節點遙測上報（node）
 
-節點需連到 `GET /vbs/telemetry/ws`，Upgrade 時攜帶：
+節點連到 `GET /vbs/telemetry/ws` 時可採其中一種：
 
-- `Authorization: Bearer <cloudflare-access-jwt-with-role-route|engine|capture|console>`
+- `Authorization: Bearer <cloudflare-access-jwt-with-node-identity>`
+- `Cf-Access-Client-Id` + `Cf-Access-Client-Secret`
 
 驗證通過後，Console 會更新節點快照並標記 `online`。
 
@@ -50,17 +50,17 @@ curl -sS http://127.0.0.1:5000/api/v1/telemetry/latest \
 
 ```bash
 wscat -c ws://127.0.0.1:5000/vbs/telemetry/events/ws \
-  -H "Authorization: Bearer <cloudflare-access-jwt-with-role-admin>"
+  -H "Authorization: Bearer <cloudflare-or-console-jwt>"
 ```
 
-當節點超過 `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC` 未更新遙測時，會收到 `node_offline` 事件；恢復後會收到 `node_online`。
+當節點超過 `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC` 未更新遙測時，會收到 `node_offline`；恢復後收到 `node_online`。
 
 ## 6) Route / Engine 對接重點
 
-- Route / Engine 對 Console 一律帶 `Authorization: Bearer <VBS_CF_ACCESS_JWT>`。
-- Route / Engine 控制面由 Console 代理時，Console 會轉發呼叫者原始 JWT（不再使用任何固定 control token）。
+- Console 對 Route / Engine 控制面下發一律優先使用 `Cf-Access-Client-Id` / `Cf-Access-Client-Secret`（M2M）。
+- `Cf-Access-Jwt-Assertion` 僅作控制面後備路徑，且節點端僅接受 `node` 身分。
 
 ## 備註
 
-- 生產環境應由安全管道注入 `VBS_CF_ACCESS_JWT` 與 Access 策略。
-- JWKS 採記憶體快取，避免每請求拉取公鑰；未知 `kid` 會觸發立即刷新。
+- 生產環境應由安全管道注入 Access JWT、Service Token 與對應策略。
+- JWKS 採記憶體快取；未知 `kid` 會觸發立即刷新。

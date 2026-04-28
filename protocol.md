@@ -53,7 +53,7 @@
 | Route-SRT-Internal / 20021 | UDP/SRT | 本機 127.0.0.1 | — | Route 內部 |
 | Route-SRT-Out / 20030 | UDP/SRT | `srt://<DNS 或域名>:20030` Listener | —（媒體層 passphrase） | Route → Engine |
 | Route-Telemetry | WSS | 由 `VBS_CONSOLE_BASE_URL` + `VBS_ROUTE_TELEMETRY_WS_PATH` 衍生之 `wss://…` | `Authorization: Bearer <Cloudflare Access JWT>` **或** `Cf-Access-Client-Id/Secret` | Route → Console Hub |
-| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | `/healthz` 無；其餘 **`Cf-Access-Client-Id`／`Cf-Access-Client-Secret`**（與節點 `VBS_CF_ACCESS_*` 一致）**或** `Cf-Access-Jwt-Assertion`／Bearer JWT（映射為 admin/operator） | Console orchestrator／維運 → Route |
+| Route-Control-HTTP | HTTP | `http://<route>:20080`（預設，可關閉） | `/healthz` 無；其餘 **`Cf-Access-Client-Id`／`Cf-Access-Client-Secret`**（與節點 `VBS_CF_ACCESS_*` 一致）**或** `Cf-Access-Jwt-Assertion`／Bearer JWT（僅接受 node 身分） | Console orchestrator／維運 → Route |
 | Route-Control-HTTP | HTTP | `POST /api/v1/show-config/apply` | 同上（Orchestrator 自動附 Service Token） | Console orchestrator → Route |
 
 ### Route-Telemetry Payload
@@ -71,7 +71,7 @@
 
 ### Route-Control：`POST /api/v1/route/buffer`
 
-**Headers**：`Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發；需通過本地映射為 admin/operator），`Content-Type: application/json`
+**Headers**：`Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發；需通過本地映射為 admin/guest），`Content-Type: application/json`
 
 ```json
 {
@@ -161,7 +161,6 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
-| `VBS_CF_ACCESS_MODE` | 是 | 固定 `jwt`（ZTA 模式）。 |
 | `VBS_CF_ACCESS_AUD` | 是 | Cloudflare Access JWT audience（Single AUD）。 |
 | `VBS_CF_ACCESS_TEAM_DOMAIN` | 條件必填 | Cloudflare team domain（若未提供 `VBS_CF_ACCESS_JWKS_URL` 則必填）。 |
 | `VBS_CF_ACCESS_JWKS_URL` | 條件必填 | Cloudflare JWKS URL（若未提供 `VBS_CF_ACCESS_TEAM_DOMAIN` 則必填）。 |
@@ -192,17 +191,17 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 | --- | --- | --- | --- | --- |
 | Console-HTTP / 4000 | HTTP | `GET /healthz` | 無 | 健康檢查 |
 | Console-Telemetry | WS/WSS | `GET /vbs/telemetry/ws`（Upgrade） | `Authorization: Bearer <Cloudflare Access JWT>`；驗簽後以 `common_name` 前綴映射為 node 身分 | Route/Engine/Capture → Console |
-| Console-Telemetry-Events | WS/WSS | `GET /vbs/telemetry/events/ws`（Upgrade） | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/operator | Console → UI（online/offline 狀態事件） |
-| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/operator | 讀取每節點最近一次遙測（內存 + presence） |
+| Console-Telemetry-Events | WS/WSS | `GET /vbs/telemetry/events/ws`（Upgrade） | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/guest | Console → UI（online/offline 狀態事件） |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/guest | 讀取每節點最近一次遙測（內存 + presence） |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/stream/session-key` | `Authorization: Bearer <Cloudflare Access JWT>`；需映射為 admin | 生成當次直播 SRT AES-256 passphrase |
-| Console-HTTP / 4000 | HTTP | `GET /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin/operator） | 讀取今日 Runtime 配置 |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin/guest） | 讀取今日 Runtime 配置 |
 | Console-HTTP / 4000 | HTTP | `PUT /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin） | 儲存今日 Runtime 配置 |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/runtime/config/apply` | `Authorization: Bearer <JWT>`（admin） | 以 staged apply 下發至 Route/Engine（失敗回退） |
-| Console-HTTP / 4000 | HTTP | `GET /api/v1/show-config` | `Authorization: Bearer <JWT>`（admin／operator） | 讀取 Show Config **draft**、**effective** 與版本時間戳 |
-| Console-HTTP / 4000 | HTTP | `PUT /api/v1/show-config/draft` | `Authorization: Bearer <JWT>`（admin／operator） | 儲存草稿（body 為完整 Show Config JSON；須與目前 `runtime.config.inputs` 交叉驗證） |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/show-config` | `Authorization: Bearer <JWT>`（admin／guest） | 讀取 Show Config **draft**、**effective** 與版本時間戳 |
+| Console-HTTP / 4000 | HTTP | `PUT /api/v1/show-config/draft` | `Authorization: Bearer <JWT>`（admin） | 儲存草稿（body 為完整 Show Config JSON；須與目前 `runtime.config.inputs` 交叉驗證） |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/show-config/apply` | `Authorization: Bearer <JWT>`（admin） | 依序嘗試 **Capture／Route／Engine** `POST /api/v1/show-config/apply`（若該基底 URL 未設定則 skip）；**全部成功或 skip** 後才將 draft 設為 Console **effective** 並寫入 history |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/show-config/rollback` | `Authorization: Bearer <JWT>`（admin） | 以上一版 history 快照回滾 effective，並再次轉發各節點 `POST /api/v1/show-config/apply` |
-| Console-HTTP / 4000 | HTTP | `GET /api/v1/show-config/history?limit=50` | `Authorization: Bearer <JWT>`（admin／operator） | 列出套用紀錄（version、applied_at、downstream_result） |
+| Console-HTTP / 4000 | HTTP | `GET /api/v1/show-config/history?limit=50` | `Authorization: Bearer <JWT>`（admin／guest） | 列出套用紀錄（version、applied_at、downstream_result） |
 
 ### Show Config（節點契約，待各節點實作）
 
@@ -227,7 +226,7 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 - 外部門禁：Cloudflare Access Single AUD（Admin/Nodes）。
 - 內部臨時授權：Console 可簽發短效 Guest JWT（PIN/魔術連結對應租約）。
 - 驗證方式：Cloudflare JWT 以 JWKS 驗簽（記憶體快取預設 1h）；Console JWT 以本地公鑰驗簽。
-- 權限決策：先驗 `iss/aud/exp/nbf`，再以本地名冊/規則映射（admin / node / guest-operator）。
+- 權限決策：先驗 `iss/aud/exp/nbf`，再以本地名冊/規則映射（admin / node / guest）。
 - 去註冊化：節點連線即驗證、驗證通過即更新狀態，不再有 register/refresh API。
 
 ### 本機驗證

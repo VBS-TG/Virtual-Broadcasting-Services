@@ -440,11 +440,13 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 }
 
 func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleauth.Provider) bool {
-	// 1) Cloudflare Access Service Token（Console Orchestrator / M2M 全自動，無需人工 JWT）
+	// Release policy:
+	// 1) Preferred M2M path: Cf-Access-Client-Id/Secret from Console orchestrator.
+	// 2) Fallback path: Cf-Access-Jwt-Assertion (Cloudflare JWT), but only "node" identity is accepted.
 	if matchInboundAccessServiceToken(r, cfg) {
 		return true
 	}
-	// 2) Cf-Access-Jwt-Assertion（人員或已注入 JWT 的請求）
+	// 2) Cf-Access-Jwt-Assertion fallback
 	got := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion"))
 	if got == "" {
 		return false

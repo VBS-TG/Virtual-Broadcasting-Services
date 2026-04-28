@@ -15,7 +15,6 @@ services:
         required: false
     environment:
       VBS_CONSOLE_HTTP_BIND: ":4000"
-      VBS_CF_ACCESS_MODE: jwt
       # VBS_CF_ACCESS_JWKS_URL: "https://<team-domain>/cdn-cgi/access/certs"
       VBS_CF_JWKS_CACHE_TTL_SEC: "3600"
       VBS_CONSOLE_NODE_OFFLINE_TTL_SEC: "10"

@@ -36,7 +36,6 @@ type AccessClaims struct {
 }
 
 type AccessJWTVerifier struct {
-	mode          string
 	cfIssuer      string
 	cfAud         string
 	cfJWKSURL     string
@@ -63,14 +62,7 @@ type accessJWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAccessJWTVerifier(mode, teamDomain, aud, jwksURL string, cacheTTL time.Duration, adminEmails []string, nodeCNPrefix, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
-	mode = strings.TrimSpace(strings.ToLower(mode))
-	if mode == "" {
-		mode = "jwt"
-	}
-	if mode != "jwt" {
-		return nil, fmt.Errorf("unsupported VBS_CF_ACCESS_MODE=%q (expected jwt)", mode)
-	}
+func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duration, adminEmails []string, nodeCNPrefix, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
 	if strings.TrimSpace(aud) == "" {
 		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD is required")
 	}
@@ -115,7 +107,6 @@ func NewAccessJWTVerifier(mode, teamDomain, aud, jwksURL string, cacheTTL time.D
 	}
 
 	return &AccessJWTVerifier{
-		mode:          mode,
 		cfIssuer:      cfIssuer,
 		cfAud:         strings.TrimSpace(aud),
 		cfJWKSURL:     resolvedJWKSURL,
@@ -139,7 +130,7 @@ func (v *AccessJWTVerifier) VerifyRequest(r *http.Request) (*AccessClaims, error
 
 // VerifyRequestPreferBearer prioritizes application-layer bearer tokens.
 // This is used by Console control/admin authorization to avoid Cloudflare
-// service-token identity overshadowing a valid admin/operator bearer token.
+// service-token identity overshadowing a valid admin/guest bearer token.
 func (v *AccessJWTVerifier) VerifyRequestPreferBearer(r *http.Request) (*AccessClaims, error) {
 	if claims, err := v.VerifyBearer(r.Header.Get("Authorization")); err == nil {
 		return claims, nil
@@ -269,7 +260,7 @@ func (v *AccessJWTVerifier) verifyConsoleToken(raw string) (*AccessClaims, error
 }
 
 func (v *AccessJWTVerifier) MintGuestToken(subject, scope string, ttl time.Duration, sessionVersion int) (string, error) {
-	return v.mintRoleToken(subject, "operator", scope, ttl, sessionVersion)
+	return v.mintRoleToken(subject, "guest", scope, ttl, sessionVersion)
 }
 
 func (v *AccessJWTVerifier) MintAdminToken(subject string, ttl time.Duration) (string, error) {

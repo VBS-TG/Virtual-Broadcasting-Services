@@ -6,7 +6,6 @@ import { parseJwt } from '../lib/jwt'
 interface AuthState {
   user: AuthUser | null
   login: (token: string, role?: UserRole, email?: string) => void
-  loginAdminByEmail: (email: string) => void
   logout: () => void
   isLoggedIn: () => boolean
 }
@@ -18,7 +17,9 @@ export const useAuthStore = create<AuthState>()(
 
       login: (token: string, role?: UserRole, email?: string) => {
         const payload = parseJwt(token)
-        const tokenRole = role || (payload?.role as UserRole) || 'operator'
+        const payloadRole = String(payload?.role ?? '').toLowerCase()
+        const tokenRole =
+          role || (payloadRole === 'admin' || payloadRole === 'guest' ? (payloadRole as UserRole) : 'guest')
         const normalizedEmail = (email || String(payload?.email ?? '')).trim().toLowerCase() || undefined
         
         const tokenPreview =
@@ -34,13 +35,6 @@ export const useAuthStore = create<AuthState>()(
             email: normalizedEmail,
           },
         })
-      },
-
-      loginAdminByEmail: (email: string) => {
-        const normalized = email.trim().toLowerCase()
-        const preview = normalized.length > 24 ? `${normalized.slice(0, 20)}...` : normalized
-        // Admin email mode relies on Cloudflare Access browser session cookie.
-        set({ user: { token: '', role: 'admin', tokenPreview: preview, expiresAt: null, email: normalized } })
       },
 
       logout: () => {

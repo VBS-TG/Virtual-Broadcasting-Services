@@ -21,7 +21,6 @@ type Config struct {
 	NodeOfflineTTL time.Duration
 	CORSAllowedOrigins []string
 
-	CFAccessMode       string
 	CFAccessTeamDomain string
 	CFAccessAUD        string
 	CFAccessJWKSURL    string
@@ -55,13 +54,6 @@ func Load() (*Config, error) {
 	listen := strings.TrimSpace(os.Getenv("VBS_CONSOLE_HTTP_BIND"))
 	if listen == "" {
 		listen = defaultListen
-	}
-	accessMode := strings.TrimSpace(strings.ToLower(getenvDefault("VBS_CF_ACCESS_MODE", "jwt")))
-	if accessMode == "disabled" {
-		return nil, fmt.Errorf("VBS_CF_ACCESS_MODE=disabled is not allowed in ZTA mode")
-	}
-	if accessMode != "jwt" && accessMode != "" {
-		return nil, fmt.Errorf("unsupported VBS_CF_ACCESS_MODE=%q (expected jwt)", accessMode)
 	}
 	aud := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_AUD"))
 	if aud == "" {
@@ -129,7 +121,6 @@ func Load() (*Config, error) {
 		TelemetryMax:       maxPayload,
 		NodeOfflineTTL:     time.Duration(offlineTTL) * time.Second,
 		CORSAllowedOrigins: splitCSVRaw(getenvDefault("VBS_CORS_ALLOWED_ORIGINS", "https://vbs.cyblisswisdom.org,http://localhost:5173")),
-		CFAccessMode:       accessMode,
 		CFAccessTeamDomain: teamDomain,
 		CFAccessAUD:        aud,
 		CFAccessJWKSURL:    jwksURL,

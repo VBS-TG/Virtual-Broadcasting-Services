@@ -22,7 +22,7 @@
           "ts_ms": { "type": "integer", "minimum": 0 },
           "metrics": { "type": "object" },
           "received_at": { "type": "string", "format": "date-time" },
-          "auth_mode": { "type": "string", "enum": ["bearer", "legacy_key"] }
+          "auth_mode": { "type": "string", "enum": ["bearer", "service_token"] }
         }
       }
     }

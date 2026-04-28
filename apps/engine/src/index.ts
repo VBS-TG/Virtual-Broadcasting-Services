@@ -289,6 +289,7 @@ function matchInboundAccessServiceToken(req: IncomingMessage): boolean {
   const gotId = String(req.headers["cf-access-client-id"] ?? "").trim();
   const gotSecret = String(req.headers["cf-access-client-secret"] ?? "").trim();
   if (!gotId || !gotSecret) return false;
+  if (gotId.length !== wantId.length || gotSecret.length !== wantSecret.length) return false;
   try {
     const bi = Buffer.from(gotId);
     const wi = Buffer.from(wantId);
@@ -301,6 +302,9 @@ function matchInboundAccessServiceToken(req: IncomingMessage): boolean {
 }
 
 async function authorized(req: IncomingMessage): Promise<boolean> {
+  // Release policy:
+  // 1) preferred M2M service token from Console orchestrator
+  // 2) fallback Cloudflare JWT assertion, but only node identity may pass
   if (matchInboundAccessServiceToken(req)) return true;
   const cfAssertion = String(req.headers["cf-access-jwt-assertion"] ?? "").trim();
   if (!cfAssertion) return false;
@@ -377,7 +381,7 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
     const selected = String(next.aux_sources?.[ch] ?? state.aux[ch] ?? `input${ch}`);
     await assignProductionInput(productionID, mixerInputForAux(ch), sourceIDFromSelection(selected));
   }
-  // Optional compatibility path if Open Live deployment exposes legacy endpoint.
+  // Optional compatibility path for non-default Open Live apply endpoint.
   if (openLiveApplyPath && openLiveApplyPath !== "/api/v1/runtime/config/apply") {
     const compat = await openLiveSend(openLiveApplyPath, "POST", next);
     if (!compat.ok) {
