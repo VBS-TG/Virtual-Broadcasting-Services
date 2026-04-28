@@ -1,13 +1,11 @@
 // ── 頁面路由 key ──────────────────────────────────────────────────────────────
 export type PageKey =
   | 'dashboard'
-  | 'runtime'
   | 'switcher'
-  | 'multiviewer'
+  | 'pipeline'
+  | 'rental-sessions'
   | 'telemetry'
-  | 'system'
   | 'logs'
-  | 'settings'
 
 // ── 角色 ──────────────────────────────────────────────────────────────────────
 export type UserRole = 'admin' | 'guest'
@@ -21,20 +19,15 @@ export interface AuthUser {
   email?: string
 }
 
-// ── 節點狀態（Dashboard 用） ──────────────────────────────────────────────────
-export interface NodeStatus {
-  id: 'console' | 'route' | 'engine'
-  label: string
-  status: 'ONLINE' | 'OFFLINE' | 'UNKNOWN'
-}
-
 // ── Runtime Config ────────────────────────────────────────────────────────────
 export interface RuntimeConfig {
   inputs: number           // 1~8
   pgm_count: number        // 固定 1
   aux_count: number        // 0~4
-  input_sources: string[]  // srt://...
-  aux_sources: Record<string, string> // { aux1: 'input1' | 'srt://...' }
+  aux_sources: Record<string, string> // { "1": "input1" | "srt://..." }
+  capture_inputs?: number
+  other_inputs?: number
+  runtime_auto_inputs?: boolean
 }
 
 // ── Apply 結果 ────────────────────────────────────────────────────────────────
@@ -44,11 +37,10 @@ export interface ApplyResult {
   rolled_back: boolean
   message: string
   timestamp: string
-  /** Runtime apply：下游細節（原樣保留供 UI 進階展示） */
   downstream?: Record<string, unknown>
 }
 
-// ── Show Config（對齊後端 JSON 形狀，snake_case）────────────────────────────────
+// ── Show Config ───────────────────────────────────────────────────────────────
 export interface ShowConfigPayload {
   schema_version: string
   profile: {
@@ -128,21 +120,9 @@ export interface OperationLogEntry {
 // ── App Settings ──────────────────────────────────────────────────────────────
 export interface AppSettings {
   apiBaseUrl: string
-  engineBaseUrl: string
-  /** Route HTTP 控制面基底 URL（供客戶端健康檢查 GET …/healthz） */
-  routeBaseUrl: string
-  refreshInterval: number // ms
+  refreshInterval: number
   theme: 'dark' | 'light'
   apiTimeoutMs: number
 }
 
-// ── Health Check ──────────────────────────────────────────────────────────────
-export interface HealthCheckResult {
-  label: string
-  url: string
-  statusCode: number | null
-  ok: boolean
-  latencyMs: number | null
-  error?: string
-  checkedAt: string | null
-}
+

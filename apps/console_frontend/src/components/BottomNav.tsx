@@ -1,15 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom'
-
-import { LayoutDashboard, MonitorPlay, Activity, FileText, Network, KeyRound } from 'lucide-react'
-
-const NAV_ITEMS = [
-  { path: '/dashboard',   label: '總覽', icon: LayoutDashboard },
-  { path: '/switcher',    label: '導播', icon: MonitorPlay },
-  { path: '/pipeline',    label: '鏈路', icon: Network },
-  { path: '/rental-sessions', label: '租賃', icon: KeyRound },
-  { path: '/telemetry',   label: '遙測', icon: Activity },
-  { path: '/logs',        label: '日誌', icon: FileText },
-]
+import { NAV_ITEMS } from '../config/navigation'
 
 export default function BottomNav() {
   const navigate = useNavigate()
@@ -34,10 +24,11 @@ export default function BottomNav() {
             <div className={`transition-transform duration-200 mb-0.5 ${isActive ? 'scale-110' : ''}`}>
               <item.icon className="w-5 h-5" />
             </div>
-            <span className="text-[10px] font-semibold tracking-wide leading-none">{item.label}</span>
+            <span className="text-[10px] font-bold tracking-wide leading-none">{item.label}</span>
           </button>
         )
       })}
     </nav>
   )
 }
+

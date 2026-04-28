@@ -1,136 +1,106 @@
 import { useEffect } from 'react'
-import { Network } from 'lucide-react'
+import { Network, Activity, Globe } from 'lucide-react'
 import { useShowConfigStore } from '../stores/showConfigStore'
-import { canAccess } from '../lib/permissions'
-import { useToastStore } from '../stores/toastStore'
+import PageShell from '../components/PageShell'
 
 export default function PipelinePage() {
-  const isAdmin = canAccess('admin')
-  const { draft, loading, saving, error, saveDraft, setLocalDraft } = useShowConfigStore()
+  const { draft, loading, error, fetch } = useShowConfigStore()
 
   useEffect(() => {
-    void useShowConfigStore.getState().fetch()
-  }, [])
-
-  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
-    useToastStore.getState().addToast({ title: msg, type })
-  }
-
-  const handleSave = async () => {
-    if (!draft || !isAdmin) return
-    const ok = await saveDraft(draft)
-    const err = useShowConfigStore.getState().error
-    showToast(ok ? '草稿已儲存' : (err ?? '儲存失敗'), ok ? 'success' : 'error')
-  }
+    fetch()
+  }, [fetch])
 
   if (loading && !draft) {
     return (
-      <div className="h-full flex items-center justify-center p-6 text-vbs-muted text-[15px] font-semibold">
-        載入製作設定…
-      </div>
+      <PageShell title="鏈路" description="Pipeline Monitoring">
+        <div className="h-[400px] flex items-center justify-center text-vbs-muted text-[15px] font-black uppercase tracking-widest animate-pulse">
+          Loading Pipeline Architecture…
+        </div>
+      </PageShell>
     )
   }
 
   if (!draft) {
     return (
-      <div className="h-full flex items-center justify-center p-6 text-vbs-pgm text-[15px] font-semibold">
-        {error ?? '無法載入草稿'}
-      </div>
+      <PageShell title="鏈路" description="Pipeline Monitoring">
+        <div className="h-[400px] flex items-center justify-center text-vbs-pgm text-[15px] font-black uppercase tracking-widest">
+          {error ?? 'Failed to load pipeline configuration'}
+        </div>
+      </PageShell>
     )
   }
 
   const t = draft.profile.target ?? { width: 1920, height: 1080, frame_rate: 60 }
 
   return (
-    <div className="h-full overflow-y-auto p-3 md:p-4 flex flex-col gap-4 max-w-3xl">
-      <div className="flex items-center gap-2">
-        <Network className="w-5 h-5 text-vbs-accent shrink-0" />
-        <h2 className="text-[15px] font-black text-vbs-muted uppercase tracking-widest">Pipeline（編輯草稿）</h2>
-      </div>
-
-      {error && (
-        <div className="glass border border-vbs-pgm/40 rounded-xl px-4 py-3 text-[14px] text-vbs-pgm font-medium">{error}</div>
-      )}
-
-      {!isAdmin && (
-        <p className="text-[14px] text-vbs-warning font-semibold">
-          目前為唯讀：僅管理員可儲存草稿。完整映射編輯介面將依 frontend_Revise.md 擴充。
-        </p>
-      )}
-
-      <div className="glass rounded-xl p-4 flex flex-col gap-4">
-        <span className="text-[12px] font-black text-vbs-muted uppercase tracking-widest">端到端目標格式（Capture → Route → Engine）</span>
-        <div className="grid grid-cols-3 gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-bold text-vbs-muted uppercase">寬度</span>
-            <input
-              type="number"
-              disabled={!isAdmin}
-              value={t.width}
-              onChange={(e) =>
-                setLocalDraft({
-                  ...draft,
-                  profile: {
-                    ...draft.profile,
-                    target: { ...t, width: Number(e.target.value) || 0 },
-                  },
-                })
-              }
-              className="glass-dark border border-white/10 rounded-xl px-3 py-2 text-vbs-text font-mono disabled:opacity-60"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-bold text-vbs-muted uppercase">高度</span>
-            <input
-              type="number"
-              disabled={!isAdmin}
-              value={t.height}
-              onChange={(e) =>
-                setLocalDraft({
-                  ...draft,
-                  profile: {
-                    ...draft.profile,
-                    target: { ...t, height: Number(e.target.value) || 0 },
-                  },
-                })
-              }
-              className="glass-dark border border-white/10 rounded-xl px-3 py-2 text-vbs-text font-mono disabled:opacity-60"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-bold text-vbs-muted uppercase">幀率 fps</span>
-            <input
-              type="number"
-              step={0.01}
-              disabled={!isAdmin}
-              value={t.frame_rate}
-              onChange={(e) =>
-                setLocalDraft({
-                  ...draft,
-                  profile: {
-                    ...draft.profile,
-                    target: { ...t, frame_rate: Number(e.target.value) || 0 },
-                  },
-                })
-              }
-              className="glass-dark border border-white/10 rounded-xl px-3 py-2 text-vbs-text font-mono disabled:opacity-60"
-            />
-          </label>
+    <PageShell 
+      title="鏈路" 
+      description="Pipeline Monitoring"
+      extra={
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black text-vbs-muted uppercase tracking-widest">Profile Mode:</span>
+          <span className="text-[12px] font-black text-white bg-white/5 px-3 py-1 rounded-lg uppercase tracking-tighter border border-white/5">{draft.profile.mode}</span>
         </div>
-        <p className="text-[13px] text-vbs-muted leading-relaxed">
-          profile.mode：<span className="font-mono text-vbs-text">{draft.profile.mode}</span>
-          。儲存後請至「Show Control」執行套用，始會下發至各節點。
-        </p>
-        <button
-          type="button"
-          disabled={!isAdmin || saving}
-          onClick={() => void handleSave()}
-          className="self-start glass border border-vbs-accent/50 text-vbs-accent font-bold px-5 py-2.5 rounded-xl
-            hover:bg-vbs-accent/15 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saving ? '儲存中…' : '儲存草稿'}
-        </button>
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+        
+        {/* ── 目標輸出規格 ── */}
+        <div className="md:col-span-4 glass rounded-[32px] p-8 flex flex-col gap-6 shadow-xl relative overflow-hidden">
+          <div className="flex items-center gap-3 mb-2">
+            <Activity className="w-5 h-5 text-vbs-accent" />
+            <span className="text-[14px] font-black text-white uppercase tracking-widest">目標輸出規格</span>
+          </div>
+          <div className="grid grid-cols-1 gap-6">
+            <div className="flex flex-col">
+              <span className="text-[11px] font-black text-vbs-muted uppercase tracking-widest mb-1">解析度 (Resolution)</span>
+              <span className="text-4xl font-black text-white tracking-tighter tabular-nums">{t.width}<span className="text-vbs-muted mx-2 text-2xl font-medium">×</span>{t.height}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[11px] font-black text-vbs-muted uppercase tracking-widest mb-1">幀率 (Frame Rate)</span>
+              <span className="text-4xl font-black text-vbs-pvw tracking-tighter tabular-nums">{t.frame_rate}<span className="text-[14px] ml-1 font-bold">FPS</span></span>
+            </div>
+          </div>
+          <div className="mt-4 pt-6 border-t border-white/5">
+            <p className="text-[13px] font-bold text-vbs-muted leading-relaxed uppercase tracking-tight">
+              自動化配置已生效：端到端（Capture → Route → Engine）同步鎖定此規格。
+            </p>
+          </div>
+        </div>
+
+        {/* ── 輸入源清單 (Automation Sources) ── */}
+        <div className="md:col-span-8 glass rounded-[32px] p-8 shadow-xl flex flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Network className="w-5 h-5 text-vbs-accent" />
+              <span className="text-[14px] font-black text-white uppercase tracking-widest">鏈路輸入來源</span>
+            </div>
+            <span className="text-[11px] font-black text-vbs-muted uppercase tracking-widest px-3 py-1 bg-white/5 rounded-lg border border-white/5">ReadOnly</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {draft.sources.map((s) => (
+              <div key={s.slot_id} className="glass-dark border border-white/5 rounded-2xl p-5 flex items-center gap-4 group hover:border-vbs-accent/30 transition-all">
+                <div className="w-12 h-12 rounded-xl bg-vbs-accent/10 flex items-center justify-center shrink-0 border border-vbs-accent/20">
+                  <Globe className="w-6 h-6 text-vbs-accent" />
+                </div>
+                <div className="flex flex-col overflow-hidden">
+                  <span className="text-[10px] font-black text-vbs-muted uppercase tracking-widest mb-0.5">{s.slot_id}</span>
+                  <span className="text-[15px] font-black text-white truncate uppercase tracking-tight">{s.display_name}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {draft.sources.length === 0 && (
+            <div className="h-[200px] flex items-center justify-center text-vbs-muted text-[13px] font-black uppercase tracking-widest border-2 border-dashed border-white/5 rounded-[24px]">
+              No sources configured
+            </div>
+          )}
+        </div>
+
       </div>
-    </div>
+    </PageShell>
   )
 }
+

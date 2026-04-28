@@ -1,6 +1,5 @@
 import type {
   RuntimeConfig,
-  ApplyResult,
   SwitchState,
   TelemetryLatest,
   ShowConfigPayload,
@@ -53,6 +52,24 @@ interface PresenceRecord {
 
 let adminRefreshInFlight: Promise<boolean> | null = null
 
+function normalizeApiError(payload: any, status: number): string {
+  const code = String(payload?.code ?? '').trim()
+  const raw = String(payload?.error ?? payload?.message ?? '').trim()
+  const fallback = raw || `HTTP ${status}`
+  switch (code) {
+    case 'invalid_source':
+      return '來源格式不正確，請選擇有效輸入來源'
+    case 'invalid_channel':
+      return 'AUX 通道路號不正確'
+    case 'missing_field':
+      return '缺少必要欄位，請檢查輸入內容'
+    case 'invalid_json':
+      return '資料格式錯誤，請重新整理後再試'
+    default:
+      return fallback
+  }
+}
+
 function resolvePublicApiBase(): string {
   const raw = String(import.meta.env.VITE_API_BASE_URL ?? '').trim()
   if (!raw) return 'https://vbsapi.cyblisswisdom.org'
@@ -98,17 +115,17 @@ export async function request<T>(
         const second = await performFetch(method, firstURL, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
         if (!second.ok) {
           return {
-            error: second.data?.error ?? second.data?.message ?? `HTTP ${second.status}`,
+            error: normalizeApiError(second.data, second.status),
             statusCode: second.status,
             latencyMs,
           }
         }
         return { data: second.data, statusCode: second.status, latencyMs }
       }
-      return { error: first.data?.error ?? 'unauthorized', statusCode: 401, latencyMs }
+      return { error: normalizeApiError(first.data, 401), statusCode: 401, latencyMs }
     }
     if (!first.ok) {
-      return { error: first.data?.error ?? first.data?.message ?? `HTTP ${first.status}`, statusCode: first.status, latencyMs }
+      return { error: normalizeApiError(first.data, first.status), statusCode: first.status, latencyMs }
     }
     return { data: first.data, statusCode: first.status, latencyMs }
   } catch (err) {
@@ -198,7 +215,6 @@ function sourceToInputNumber(source: unknown): number {
 
 function parseRuntimeConfig(payload: any): RuntimeConfig {
   const cfg = payload?.config ?? payload ?? {}
-  const inputSources = Array.isArray(cfg.input_sources) ? cfg.input_sources.map((v: unknown) => String(v)) : []
   const auxSourcesRaw = cfg.aux_sources && typeof cfg.aux_sources === 'object' ? cfg.aux_sources : {}
   const auxSources: Record<string, string> = {}
   for (const [k, v] of Object.entries(auxSourcesRaw)) {
@@ -208,39 +224,10 @@ function parseRuntimeConfig(payload: any): RuntimeConfig {
     inputs: Number(cfg.inputs ?? 8),
     pgm_count: Number(cfg.pgm_count ?? 1),
     aux_count: Number(cfg.aux_count ?? 0),
-    input_sources: inputSources,
     aux_sources: auxSources,
-  }
-}
-
-function nodeApplyOK(block: unknown): boolean {
-  if (block == null) return true
-  if (typeof block !== 'object' || block === null) return Boolean(block)
-  const o = block as Record<string, unknown>
-  if (o.skipped === true) return true
-  return Boolean(o.ok)
-}
-
-function parseApplyResult(payload: any): ApplyResult {
-  const routeOK = nodeApplyOK(payload?.route)
-  const engineOK = nodeApplyOK(payload?.engine)
-  const rolledRaw = payload?.rolled_back
-  let rolledBack = false
-  if (rolledRaw && typeof rolledRaw === 'object' && !Array.isArray(rolledRaw)) {
-    rolledBack = Object.values(rolledRaw as Record<string, boolean>).some(Boolean)
-  }
-  const t = Number(payload?.applied_at ?? 0) || Math.floor(Date.now() / 1000)
-  const parts: string[] = []
-  if (!routeOK) parts.push('Route 節點套用失敗')
-  if (!engineOK) parts.push('Engine 節點套用失敗')
-  if (rolledBack) parts.push('已嘗試回滾上一版設定')
-  return {
-    route: routeOK,
-    engine: engineOK,
-    rolled_back: rolledBack,
-    message: parts.length ? parts.join('；') : '套用完成',
-    timestamp: new Date(t * 1000).toISOString(),
-    downstream: typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : undefined,
+    capture_inputs: Number(payload?.capture_inputs ?? cfg.capture_inputs ?? 0),
+    other_inputs: Number(payload?.other_inputs ?? cfg.other_inputs ?? 0),
+    runtime_auto_inputs: Boolean(payload?.runtime_auto_inputs ?? cfg.runtime_auto_inputs ?? false),
   }
 }
 
@@ -329,18 +316,6 @@ export async function getRuntimeConfig(): Promise<ApiResponse<RuntimeConfig>> {
   const res = await request<any>('GET', '/api/v1/runtime/config')
   if (res.error) return res as ApiResponse<RuntimeConfig>
   return { ...res, data: parseRuntimeConfig(res.data) }
-}
-
-export async function putRuntimeConfig(config: RuntimeConfig): Promise<ApiResponse<RuntimeConfig>> {
-  const res = await request<any>('PUT', '/api/v1/runtime/config', config)
-  if (res.error) return res as ApiResponse<RuntimeConfig>
-  return { ...res, data: parseRuntimeConfig(res.data) }
-}
-
-export async function postApplyConfig(): Promise<ApiResponse<ApplyResult>> {
-  const res = await request<any>('POST', '/api/v1/runtime/config/apply')
-  if (res.error) return res as ApiResponse<ApplyResult>
-  return { ...res, data: parseApplyResult(res.data) }
 }
 
 export async function exchangeGuestPIN(pin: string): Promise<ApiResponse<GuestExchangeResult>> {
@@ -491,25 +466,3 @@ export async function getShowConfigHistory(limit = 50): Promise<ApiResponse<{ hi
   return { ...res, data: { history } }
 }
 
-export async function checkHealth(url: string): Promise<{
-  statusCode: number | null
-  latencyMs: number | null
-  ok: boolean
-  error?: string
-}> {
-  const start = performance.now()
-  try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 8000)
-    const res = await fetch(url, { method: 'GET', signal: controller.signal })
-    clearTimeout(timeoutId)
-    const latencyMs = Math.round(performance.now() - start)
-    return { statusCode: res.status || null, latencyMs, ok: res.ok }
-  } catch (err) {
-    const latencyMs = Math.round(performance.now() - start)
-    if ((err as Error).name === 'AbortError') {
-      return { statusCode: null, latencyMs, ok: false, error: 'timeout' }
-    }
-    return { statusCode: null, latencyMs, ok: false, error: (err as Error).message }
-  }
-}

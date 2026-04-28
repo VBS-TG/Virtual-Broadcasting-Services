@@ -1,23 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import logoTxtImg from '../assets/images/vbslogo-img.svg'
-import {
-  LayoutDashboard,
-  MonitorPlay,
-  Activity,
-  FileText,
-  KeyRound,
-  Network,
-} from 'lucide-react'
-
-const NAV_ITEMS = [
-  { path: '/dashboard',   label: 'Dashboard',  icon: LayoutDashboard, desc: '總覽'   },
-  { path: '/switcher',    label: 'Switcher',   icon: MonitorPlay,     desc: '導播'   },
-  { path: '/pipeline',    label: 'Pipeline',   icon: Network,         desc: '鏈路'   },
-  { path: '/rental-sessions', label: 'Rentals', icon: KeyRound,       desc: '租賃'   },
-  { path: '/telemetry',   label: 'Telemetry',  icon: Activity,        desc: '遙測'   },
-  { path: '/logs',        label: 'Logs',       icon: FileText,        desc: '日誌'   },
-]
+import { NAV_ITEMS } from '../config/navigation'
 
 export default function Sidebar() {
   const navigate = useNavigate()
@@ -33,9 +17,7 @@ export default function Sidebar() {
     <aside 
       className={`
         glass-dark flex flex-col items-center py-6 gap-2 shrink-0 z-20 
-        my-4 ml-4 h-[calc(100vh-32px)] w-[92px] rounded-[36px] /* 寬度從 72px 改為 92px */
-        
-        /* --- iOS 26 核心立體效果 --- */
+        my-4 ml-4 h-[calc(100vh-32px)] w-[92px] rounded-[36px]
         border border-white/10 
         shadow-[
           0_20px_50px_rgba(0,0,0,0.5),
@@ -47,11 +29,10 @@ export default function Sidebar() {
     >
       {/* 1. 頂部：Logo */}
       <div className="shrink-0 mb-3 px-3 flex justify-center w-full">
-        {/* 如果包含文字的 logo 太寬，可以把 w-[64px] 改小，或換成純圖示的 logo */}
         <img src={logoTxtImg} alt="VBS" className="w-[64px] h-auto object-contain drop-shadow-md" />
       </div>
 
-      {/* 2. 狀態區：ON AIR (從 Header 移植) */}
+      {/* 2. 狀態區：ON AIR */}
       <div className="shrink-0 mb-4 flex flex-col items-center gap-2">
         <div className="flex items-center gap-1.5 glass bg-black/20 border border-white/5 rounded-lg px-2 py-1.5 shadow-inner">
           <span className="w-1.5 h-1.5 rounded-full bg-vbs-pgm animate-pulse shrink-0 shadow-[0_0_8px_currentColor]" />
@@ -59,8 +40,8 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* 3. 導覽列選單 (保持滾動功能) */}
-      <div className="flex flex-col gap-3 w-full items-center overflow-y-auto pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      {/* 3. 導覽列選單 */}
+      <div className="flex flex-col gap-3 w-full items-center overflow-y-auto pb-4 custom-scrollbar-none">
         {NAV_ITEMS.map((item) => {
           const isActive = location.pathname === item.path
           return (
@@ -75,14 +56,13 @@ export default function Sidebar() {
                   : 'text-vbs-muted hover:text-white hover:bg-white/5'}
               `}
             >
-              {/* Active 指示條優化：加上外發光 */}
               {isActive && (
                 <span className="absolute left-1 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
               )}
 
               <item.icon className={`w-5 h-5 ${isActive ? 'drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]' : ''}`} />
-              <span className={`text-[10px] font-medium leading-none ${isActive ? 'opacity-100' : 'opacity-60'}`}>
-                {item.desc}
+              <span className={`text-[10px] font-bold leading-none ${isActive ? 'opacity-100' : 'opacity-60'}`}>
+                {item.label}
               </span>
             </button>
           )
@@ -93,8 +73,6 @@ export default function Sidebar() {
 
       {/* 4. 底部：角色標籤 + 登出按鈕 */}
       <div className="flex flex-col gap-3 w-full items-center mb-2 shrink-0">
-        
-        {/* 角色標籤 (從 Header 移植) */}
         {user && (
           <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg tracking-widest leading-none shadow-sm
             ${user.role === 'admin' ? 'bg-vbs-accent/20 text-vbs-accent border border-vbs-accent/30' : 'bg-vbs-pvw/20 text-vbs-pvw border border-vbs-pvw/30'}`}>
@@ -102,7 +80,6 @@ export default function Sidebar() {
           </span>
         )}
 
-        {/* 登出按鈕 */}
         <button
           onClick={handleLogout}
           className="w-[44px] h-[44px] shrink-0 rounded-full flex items-center justify-center text-vbs-muted 
@@ -116,4 +93,4 @@ export default function Sidebar() {
       </div>
     </aside>
   )
-}
+}
