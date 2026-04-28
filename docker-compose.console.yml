@@ -1,5 +1,5 @@
 # Console — Cloudflare JWT 驗證、遙測 WSS、健康檢查。
-# 必填：同目錄建立 .env.console（VBS_CF_ACCESS_AUD、VBS_CF_ACCESS_TEAM_DOMAIN 或 VBS_CF_ACCESS_JWKS_URL 等，勿提交版本庫）。
+# 請先由 .env.console.example 複製為 .env.console 後填值（勿提交版本庫）。
 # 本機：http://127.0.0.1:5000（容器內仍為 :4000）
 services:
   console:

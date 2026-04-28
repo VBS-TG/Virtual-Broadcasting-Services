@@ -20,3 +20,10 @@ apps/console_frontend/*.local
 apps/engine/node_modules
 apps/engine/dist
 
+# Local environment secrets
+.env
+.env.*
+!.env.*.example
+
+
+

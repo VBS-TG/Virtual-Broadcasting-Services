@@ -1,6 +1,5 @@
 # VBS-Engine：Eyevinn Open Live adapter（不含本地自研渲染核心）。
-# 必填變數（Open Live、Console、Cloudflare Access）請寫入同目錄 .env.engine（勿提交版本庫）。
-# 若無 .env.engine，Compose 不會再對缺漏的 ${VAR} 發警告；請仍須建立該檔後再啟動。
+# 請先由 .env.engine.example 複製為 .env.engine 後填值（勿提交版本庫）。
 # 若出現 orphan containers（例如舊版曾含 nginx）：`docker compose -f docker-compose.engine.yml up -d --build --remove-orphans`
 services:
   vbs-engine:

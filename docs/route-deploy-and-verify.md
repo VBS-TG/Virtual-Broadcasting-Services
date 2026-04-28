@@ -1,10 +1,15 @@
-# VBS-Route 部署與驗證說明（正式執行）
+# VBS-Route 部署與驗證（發布版）
 
 ## 前置條件
 
 - 已準備 **Console** 之 HTTPS 基底網址（`VBS_CONSOLE_BASE_URL`）及對應 **WSS** 遙測端點（見 `protocol.md`）。
-- **`VBS_CF_ACCESS_CLIENT_ID` + `VBS_CF_ACCESS_CLIENT_SECRET`**（Cloudflare Access service token）— 與 Console `VBS_CF_ACCESS_CLIENTS` 內該 `node_id` 映射一致。
+- 已配置 Route 本機 Access 與 M2M 憑證：
+  - `VBS_CF_ACCESS_CLIENT_ID`
+  - `VBS_CF_ACCESS_CLIENT_SECRET`
+  - `VBS_CF_ACCESS_AUD`
+  - `VBS_CF_ACCESS_TEAM_DOMAIN` 或 `VBS_CF_ACCESS_JWKS_URL`
 - **`VBS_SRT_PASSPHRASE`** 長度 10–64 字元（全系統 SRT AES-256）。
+- 建議直接複製 repo 根目錄 `.env.route.example` 另存為 `.env.route` 後填值。
 - 安全群組／防火牆已放行 Route 埠區 UDP（預設 `20020`、`20030` 等）及控制面 TCP（預設 `20080`，若啟用）。
 
 ## 啟動
@@ -18,14 +23,16 @@
 
 ### 方式 B：於建置機本地 build
 
-1. 於專案根目錄準備 `.env.route`（變數見 `protocol.md`；Compose 會自動載入該檔）。
+1. 於專案根目錄準備 `.env.route`（可由 `.env.route.example` 複製；Compose 會自動載入該檔）。
 2. `docker compose -f docker-compose.route.yml up --build -d`
 3. 檢查日誌：應見 `[route][telemetry]` JSON，且 WSS 上報不應持續認證失敗。
 
 ## 健康檢查
 
-- `GET http://<主機>:20080/healthz`（無需 Key）應回 `{"status":"ok"}`。
-- 動態調整緩衝：`POST http://<主機>:20080/api/v1/route/buffer`，標頭 `Authorization: Bearer <與 Route 目前所持 Console JWT 相同>`（Route 與 Console 以 CF Access 註冊取得之 JWT）。
+- `GET http://<主機>:20080/healthz`（無需授權）應回 `{"status":"ok"}`。
+- 控制面授權（發布版）：
+  - 主路徑：`Cf-Access-Client-Id` + `Cf-Access-Client-Secret`
+  - 後備：`Cf-Access-Jwt-Assertion`（僅 `node` 身分可通過）
 
 ## 串流驗證
 
