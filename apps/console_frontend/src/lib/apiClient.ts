@@ -53,6 +53,12 @@ interface PresenceRecord {
 
 let adminRefreshInFlight: Promise<boolean> | null = null
 
+function resolvePublicApiBase(): string {
+  const raw = String(import.meta.env.VITE_API_BASE_URL ?? '').trim()
+  if (!raw) return 'https://vbsapi.cyblisswisdom.org'
+  return raw.replace(/\/+$/, '')
+}
+
 function resolveApiBase(rawBase: string): string {
   const trimmed = rawBase.trim()
   if (!trimmed) return '/api/proxy'
@@ -69,7 +75,7 @@ function isDirectConsolePath(path: string): boolean {
 }
 
 function resolveRequestURL(apiBase: string, path: string): string {
-  if (isDirectConsolePath(path)) return path
+  if (isDirectConsolePath(path)) return `${resolvePublicApiBase()}${path}`
   return `${apiBase}${path}`
 }
 
@@ -153,7 +159,7 @@ async function tryRefreshAdminToken(apiBase: string, timeoutMs: number): Promise
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const res = await fetch('/api/v1/auth/admin/email-login', {
+      const res = await fetch(`${resolvePublicApiBase()}/api/v1/auth/admin/email-login`, {
         method: 'POST',
         signal: controller.signal,
         credentials: 'include',

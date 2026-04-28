@@ -21,9 +21,6 @@ apps/engine/node_modules
 apps/engine/dist
 
 # Local environment secrets
-.env
 .env.*
-!.env.*.example
-
 
 
