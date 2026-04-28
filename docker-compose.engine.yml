@@ -1,5 +1,5 @@
 # VBS-Engine：Eyevinn Open Live adapter（不含本地自研渲染核心）。
-# 請先由 .env.engine.example 複製為 .env.engine 後填值（勿提交版本庫）。
+# 請直接使用 env/.env.engine 覆寫到 .env.engine 後再啟動（勿提交版本庫）。
 # 若出現 orphan containers（例如舊版曾含 nginx）：`docker compose -f docker-compose.engine.yml up -d --build --remove-orphans`
 services:
   vbs-engine:

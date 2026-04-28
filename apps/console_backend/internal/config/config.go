@@ -20,6 +20,11 @@ type Config struct {
 	TelemetryMax int // max raw WS message size (bytes), default 255
 	NodeOfflineTTL time.Duration
 	CORSAllowedOrigins []string
+	NTPCheckURL string
+	NTPCheckTimeout time.Duration
+	NTPMaxSkew time.Duration
+	NTPEnforce bool
+	JWTClockSkewLeeway time.Duration
 
 	CFAccessTeamDomain string
 	CFAccessAUD        string
@@ -125,6 +130,11 @@ func Load() (*Config, error) {
 		TelemetryMax:       maxPayload,
 		NodeOfflineTTL:     time.Duration(offlineTTL) * time.Second,
 		CORSAllowedOrigins: splitCSVRaw(getenvDefault("VBS_CORS_ALLOWED_ORIGINS", "https://vbs.cyblisswisdom.org,http://localhost:5173")),
+		NTPCheckURL: getenvDefault("VBS_NTP_CHECK_URL", "https://vbsapi.cyblisswisdom.org/healthz"),
+		NTPCheckTimeout: time.Duration(getenvIntDefault("VBS_NTP_CHECK_TIMEOUT_MS", 5000)) * time.Millisecond,
+		NTPMaxSkew: time.Duration(getenvIntDefault("VBS_NTP_MAX_SKEW_SEC", 5)) * time.Second,
+		NTPEnforce: strings.EqualFold(getenvDefault("VBS_NTP_ENFORCE", "1"), "1") || strings.EqualFold(getenvDefault("VBS_NTP_ENFORCE", "1"), "true"),
+		JWTClockSkewLeeway: time.Duration(getenvIntDefault("VBS_JWT_CLOCK_SKEW_SEC", 30)) * time.Second,
 		CFAccessTeamDomain: teamDomain,
 		CFAccessAUD:        aud,
 		CFAccessJWKSURL:    jwksURL,

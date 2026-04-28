@@ -9,7 +9,7 @@
   - `VBS_CF_ACCESS_AUD`
   - `VBS_CF_ACCESS_TEAM_DOMAIN` 或 `VBS_CF_ACCESS_JWKS_URL`
 - **`VBS_SRT_PASSPHRASE`** 長度 10–64 字元（全系統 SRT AES-256）。
-- 建議直接複製 repo 根目錄 `.env.route.example` 另存為 `.env.route` 後填值。
+- 請直接使用 `env/.env.route`（正式環境實檔）填值部署。
 - 安全群組／防火牆已放行 Route 埠區 UDP（預設 `20020`、`20030` 等）及控制面 TCP（預設 `20080`，若啟用）。
 
 ## 啟動
@@ -20,10 +20,11 @@
 2. `docker login ghcr.io`。
 3. `docker pull ghcr.io/vbs-tg/virtual-broadcasting-services/vbs-route:latest`
 4. 以 `docker run --network host` 並注入 `VBS_CONSOLE_BASE_URL`、`VBS_SRT_PASSPHRASE`、`VBS_CF_ACCESS_*` 等環境變數啟動。
+5. 建議同時設定時鐘檢查參數：`VBS_NTP_CHECK_URL`、`VBS_NTP_MAX_SKEW_SEC`、`VBS_NTP_ENFORCE`。
 
 ### 方式 B：於建置機本地 build
 
-1. 於專案根目錄準備 `.env.route`（可由 `.env.route.example` 複製；Compose 會自動載入該檔）。
+1. 於專案根目錄準備 `.env.route`（建議直接由 `env/.env.route` 覆寫；Compose 會自動載入）。
 2. `docker compose -f docker-compose.route.yml up --build -d`
 3. 檢查日誌：應見 `[route][telemetry]` JSON，且 WSS 上報不應持續認證失敗。
 
@@ -43,3 +44,9 @@
 
 - 每秒至多一筆 JSON（≤255 bytes）送往 Console **WSS**。
 - **ingest 停滯自癒**：預設在曾偵測到 ≥0.5 Mbps 後，若連續 5 秒近零 ingest，會觸發管線重啟；可設 `VBS_ROUTE_STALL_INGEST_SECONDS=0` 關閉。
+
+## 時鐘同步（NTP）
+
+- Route 啟動前會以 `VBS_NTP_CHECK_URL` 進行時間偏移檢查。
+- 若偏移超過 `VBS_NTP_MAX_SKEW_SEC` 且 `VBS_NTP_ENFORCE=1`，服務會拒絕啟動。
+- 建議主機層啟用 `chrony` 或 `systemd-timesyncd` 並監控 offset。

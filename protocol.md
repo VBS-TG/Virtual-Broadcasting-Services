@@ -32,7 +32,7 @@
 | ingest 停滯自癒（曾有流量後連續歸零達閾值秒數） | 已實作，可關閉 |
 | `sysctl` rmem/wmem ≥16MB、可選 MTU | 已實作 |
 | 控制面 HTTP：`/healthz`、`/api/v1/route/buffer`（需 Bearer） | 已實作 |
-| Chrony/NTP、Cloudflare Tunnel | 主機／Console 側部署，非 Route 行程內 |
+| Chrony/NTP、Cloudflare Tunnel | 主機層強制部署（Console/Route/Engine/Capture）；Route 行程啟動前需完成時鐘檢查 |
 | `/packages/shared` 共用 Schema | 尚未建立（後續與其他節點一併導入） |
 
 ### CI/CD 與容器映像（對應 .cursorrules §7.1–§7.4）
@@ -228,6 +228,14 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 - 驗證方式：Cloudflare JWT 以 JWKS 驗簽（記憶體快取預設 1h）；Console JWT 以本地公鑰驗簽。
 - 權限決策：先驗 `iss/aud/exp/nbf`，再以本地名冊/規則映射（admin / node / guest）。
 - 去註冊化：節點連線即驗證、驗證通過即更新狀態，不再有 register/refresh API。
+
+### 時鐘同步（NTP）與 JWT 時效
+
+- **強制範圍**：`Console`、`Route`、`Engine`、`Capture`（即使 Capture 尚未開發，部署規範先行）。
+- **主機層要求**：所有節點主機必須啟用 NTP（`chrony` 或 `systemd-timesyncd`），不得在長時間未同步狀態下運行。
+- **即時系統要求**：SRT 轉播與控制面授權依賴時間一致性；若時間漂移過大，應視為發布阻斷條件。
+- **JWT 要求**：驗證與簽發需考慮小範圍 clock skew 容忍（避免因微小漂移觸發 `nbf` 誤判），但不得放寬到破壞安全邊界。
+- **驗收要求**：部署與巡檢流程必須包含 NTP 對齊檢查（含 offset 與同步來源狀態）。
 
 ### 本機驗證
 

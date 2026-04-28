@@ -11,6 +11,7 @@ import (
 	"vbs/apps/route/internal/config"
 	"vbs/apps/route/internal/router"
 	"vbs/apps/route/internal/system"
+	"vbs/pkg/clocksync"
 )
 
 func main() {
@@ -18,6 +19,24 @@ func main() {
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("[route] invalid config err=%v", err)
+	}
+	headers := map[string]string{}
+	if cfg.CFAccessClientID != "" && cfg.CFAccessClientSecret != "" {
+		headers["Cf-Access-Client-Id"] = cfg.CFAccessClientID
+		headers["Cf-Access-Client-Secret"] = cfg.CFAccessClientSecret
+	}
+	if res, err := clocksync.CheckWithHeaders(cfg.NTPCheckURL, cfg.NTPCheckTimeout, headers); err != nil {
+		if cfg.NTPEnforce {
+			log.Fatalf("[route] clock sync preflight failed err=%v", err)
+		}
+		log.Printf("[route] clock sync warning err=%v", err)
+	} else if res.Skew > cfg.NTPMaxSkew {
+		if cfg.NTPEnforce {
+			log.Fatalf("[route] clock skew too large skew_ms=%d max_skew_ms=%d", res.Skew.Milliseconds(), cfg.NTPMaxSkew.Milliseconds())
+		}
+		log.Printf("[route] clock skew warning skew_ms=%d max_skew_ms=%d", res.Skew.Milliseconds(), cfg.NTPMaxSkew.Milliseconds())
+	} else {
+		log.Printf("[route] clock sync ok skew_ms=%d max_skew_ms=%d", res.Skew.Milliseconds(), cfg.NTPMaxSkew.Milliseconds())
 	}
 
 	log.Printf("[route] 啟動 node_id=%s log_level=%s metrics_interval=%s ingest_port=%d srt_out_port=%d console_base=%s control_bind=%q",

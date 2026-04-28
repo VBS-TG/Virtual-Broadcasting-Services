@@ -46,6 +46,7 @@ type AccessJWTVerifier struct {
 	consoleIssuer string
 	consolePubKeys []ed25519.PublicKey
 	consolePrivKey ed25519.PrivateKey
+	clockSkewLeeway time.Duration
 
 	mu        sync.RWMutex
 	keys      map[string]any
@@ -62,7 +63,7 @@ type accessJWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duration, adminEmails []string, nodeCNPrefix, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
+func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duration, clockSkewLeeway time.Duration, adminEmails []string, nodeCNPrefix, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
 	if strings.TrimSpace(aud) == "" {
 		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD is required")
 	}
@@ -72,6 +73,9 @@ func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duratio
 	}
 	if cacheTTL <= 0 {
 		cacheTTL = time.Hour
+	}
+	if clockSkewLeeway < 0 {
+		clockSkewLeeway = 0
 	}
 	adminSet := make(map[string]struct{}, len(adminEmails))
 	for _, e := range adminEmails {
@@ -117,6 +121,7 @@ func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duratio
 		consoleIssuer: consoleIssuer,
 		consolePubKeys: pubKeys,
 		consolePrivKey: priv,
+		clockSkewLeeway: clockSkewLeeway,
 		keys:          map[string]any{},
 	}, nil
 }
@@ -168,6 +173,9 @@ func (v *AccessJWTVerifier) VerifyToken(raw string) (*AccessClaims, error) {
 func (v *AccessJWTVerifier) verifyCloudflareToken(raw string) (*AccessClaims, error) {
 	var claims accessJWTClaims
 	opts := []jwt.ParserOption{jwt.WithAudience(v.cfAud)}
+	if v.clockSkewLeeway > 0 {
+		opts = append(opts, jwt.WithLeeway(v.clockSkewLeeway))
+	}
 	if v.cfIssuer != "" {
 		opts = append(opts, jwt.WithIssuer(v.cfIssuer))
 	}
@@ -218,9 +226,13 @@ func (v *AccessJWTVerifier) verifyConsoleToken(raw string) (*AccessClaims, error
 	var lastErr error
 	for _, key := range v.consolePubKeys {
 		var claims accessJWTClaims
+		parseOpts := []jwt.ParserOption{jwt.WithIssuer(v.consoleIssuer), jwt.WithAudience(v.cfAud)}
+		if v.clockSkewLeeway > 0 {
+			parseOpts = append(parseOpts, jwt.WithLeeway(v.clockSkewLeeway))
+		}
 		parsed, err := jwt.ParseWithClaims(raw, &claims, func(token *jwt.Token) (any, error) {
 			return key, nil
-		}, jwt.WithIssuer(v.consoleIssuer), jwt.WithAudience(v.cfAud))
+		}, parseOpts...)
 		if err != nil {
 			lastErr = err
 			continue
@@ -280,6 +292,10 @@ func (v *AccessJWTVerifier) mintRoleToken(subject, role, scope string, ttl time.
 		return "", fmt.Errorf("role required")
 	}
 	now := time.Now().UTC()
+	notBefore := now
+	if v.clockSkewLeeway > 0 {
+		notBefore = now.Add(-v.clockSkewLeeway)
+	}
 	claims := accessJWTClaims{
 		Role:  role,
 		Scope: strings.TrimSpace(scope),
@@ -290,7 +306,7 @@ func (v *AccessJWTVerifier) mintRoleToken(subject, role, scope string, ttl time.
 			ID:        randomID(),
 			Audience:  jwt.ClaimStrings{v.cfAud},
 			IssuedAt:  jwt.NewNumericDate(now),
-			NotBefore: jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(notBefore),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}

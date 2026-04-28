@@ -112,6 +112,7 @@ func New(cfg *config.Config) *Server {
 		cfg.CFAccessAUD,
 		cfg.CFAccessJWKSURL,
 		cfg.CFAccessJWKSCacheTTL,
+		cfg.JWTClockSkewLeeway,
 		cfg.AdminEmails,
 		cfg.NodeCNPrefix,
 		cfg.ConsoleJWTIssuer,

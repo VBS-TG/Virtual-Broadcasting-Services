@@ -1,4 +1,4 @@
-# 請先由 .env.route.example 複製為 .env.route 後填值（勿提交版本庫）。
+# 請直接使用 env/.env.route 覆寫到 .env.route 後再啟動（勿提交版本庫）。
 services:
   vbs-route:
     build:

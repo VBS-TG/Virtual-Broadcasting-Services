@@ -4,7 +4,7 @@
 
 ## 前置
 
-- 於 repo 根目錄建立 `.env.console`（Compose 會自動載入）。
+- 於 repo 根目錄建立 `.env.console`（或以 `env/.env.console` 內容覆寫）。
 - 至少設定：
   - `VBS_CF_ACCESS_AUD=<cloudflare-access-audience>`
   - `VBS_CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com`（或改填 `VBS_CF_ACCESS_JWKS_URL`）
@@ -12,6 +12,10 @@
   - `VBS_CF_JWKS_CACHE_TTL_SEC=3600`
   - `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC=10`
   - `VBS_CONSOLE_TELEMETRY_MAX_BYTES=255`
+  - `VBS_NTP_CHECK_URL=https://vbsapi.cyblisswisdom.org/healthz`
+  - `VBS_NTP_MAX_SKEW_SEC=5`
+  - `VBS_NTP_ENFORCE=1`
+  - `VBS_JWT_CLOCK_SKEW_SEC=30`
 
 ## 1) 啟動 Console
 
@@ -64,3 +68,4 @@ wscat -c ws://127.0.0.1:5000/vbs/telemetry/events/ws \
 
 - 生產環境應由安全管道注入 Access JWT、Service Token 與對應策略。
 - JWKS 採記憶體快取；未知 `kid` 會觸發立即刷新。
+- 上線前需確認主機 NTP 同步狀態正常（chrony/systemd-timesyncd），避免 JWT `nbf/exp` 因時鐘漂移失敗。

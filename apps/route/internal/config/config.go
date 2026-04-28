@@ -58,6 +58,12 @@ type Config struct {
 	PGMRelayPublicHost    string
 	PGMRelayPublicPort    int
 	PGMRelayLatencyMs     int
+
+	NTPCheckURL     string
+	NTPCheckTimeout time.Duration
+	NTPMaxSkew      time.Duration
+	NTPEnforce      bool
+	JWTClockSkewLeeway time.Duration
 }
 
 const (
@@ -95,6 +101,11 @@ const (
 	envPGMRelayPublicHost    = "VBS_ROUTE_PGM_PUBLIC_HOST"
 	envPGMRelayPublicPort    = "VBS_ROUTE_PGM_PUBLIC_PORT"
 	envPGMRelayLatencyMs     = "VBS_ROUTE_PGM_READ_LATENCY_MS"
+	envNTPCheckURL           = "VBS_NTP_CHECK_URL"
+	envNTPCheckTimeoutMs     = "VBS_NTP_CHECK_TIMEOUT_MS"
+	envNTPMaxSkewSec         = "VBS_NTP_MAX_SKEW_SEC"
+	envNTPEnforce            = "VBS_NTP_ENFORCE"
+	envJWTClockSkewSec       = "VBS_JWT_CLOCK_SKEW_SEC"
 )
 
 // Load 讀取環境變數。
@@ -153,6 +164,11 @@ func Load() Config {
 	cfg.PGMRelayPublicHost = strings.TrimSpace(os.Getenv(envPGMRelayPublicHost))
 	cfg.PGMRelayPublicPort = getenvIntOrDefault(envPGMRelayPublicPort, cfg.SRTOutputPort)
 	cfg.PGMRelayLatencyMs = getenvIntOrDefault(envPGMRelayLatencyMs, 200)
+	cfg.NTPCheckURL = strings.TrimSpace(getenvOrDefault(envNTPCheckURL, "https://vbsapi.cyblisswisdom.org/healthz"))
+	cfg.NTPCheckTimeout = time.Duration(getenvIntOrDefault(envNTPCheckTimeoutMs, 5000)) * time.Millisecond
+	cfg.NTPMaxSkew = time.Duration(getenvIntOrDefault(envNTPMaxSkewSec, 5)) * time.Second
+	cfg.NTPEnforce = parseBool(getenvOrDefault(envNTPEnforce, "1"))
+	cfg.JWTClockSkewLeeway = time.Duration(getenvIntOrDefault(envJWTClockSkewSec, 30)) * time.Second
 
 	return cfg
 }
@@ -264,6 +280,11 @@ func getenvFloatOrDefault(key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+func parseBool(raw string) bool {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 func splitCSVLower(raw string) []string {

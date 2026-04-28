@@ -81,6 +81,9 @@ func (p *Provider) VerifyBearer(raw string) (*Claims, error) {
 func (p *Provider) verifyCloudflareBearer(raw string) (*Claims, error) {
 	var claims Claims
 	opts := []jwt.ParserOption{jwt.WithAudience(p.aud)}
+	if p.cfg.JWTClockSkewLeeway > 0 {
+		opts = append(opts, jwt.WithLeeway(p.cfg.JWTClockSkewLeeway))
+	}
 	if p.cfIssuer != "" {
 		opts = append(opts, jwt.WithIssuer(p.cfIssuer))
 	}

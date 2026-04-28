@@ -60,6 +60,11 @@ const cfAccessAud = requiredEnv("VBS_CF_ACCESS_AUD");
 const cfAccessTeamDomain = env("VBS_CF_ACCESS_TEAM_DOMAIN", "");
 const cfAccessJWKSURL = env("VBS_CF_ACCESS_JWKS_URL", "");
 const nodeCNPrefix = env("VBS_NODE_CN_PREFIX", "vbs-node-").toLowerCase();
+const ntpCheckURL = env("VBS_NTP_CHECK_URL", "https://vbsapi.cyblisswisdom.org/healthz");
+const ntpCheckTimeoutMs = intEnv("VBS_NTP_CHECK_TIMEOUT_MS", 5000);
+const ntpMaxSkewSec = intEnv("VBS_NTP_MAX_SKEW_SEC", 5);
+const ntpEnforce = boolEnv("VBS_NTP_ENFORCE", true);
+const jwtClockSkewSec = intEnv("VBS_JWT_CLOCK_SKEW_SEC", 30);
 
 const cfIssuer = resolveIssuer(cfAccessTeamDomain);
 const resolvedJWKSURL = resolveJWKSURL(cfIssuer, cfAccessJWKSURL);
@@ -102,6 +107,13 @@ function intEnv(name: string, defaultValue: number): number {
   if (!raw) return defaultValue;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : defaultValue;
+}
+
+function boolEnv(name: string, defaultValue: boolean): boolean {
+  const raw = env(name, "");
+  if (!raw) return defaultValue;
+  const v = raw.toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
 function joinURL(base: string, path: string): string {
@@ -313,8 +325,9 @@ async function authorized(req: IncomingMessage): Promise<boolean> {
 }
 
 async function resolveCloudflareRole(raw: string): Promise<string> {
-  const options: { audience: string; issuer?: string } = { audience: cfAccessAud };
+  const options: { audience: string; issuer?: string; clockTolerance?: number } = { audience: cfAccessAud };
   if (cfIssuer) options.issuer = cfIssuer;
+  if (jwtClockSkewSec > 0) options.clockTolerance = jwtClockSkewSec;
   const { payload } = await jwtVerify(raw, remoteJWKSet, options);
   const role = String(payload.role ?? "").trim().toLowerCase();
   if (role) return role;
@@ -610,15 +623,58 @@ const server = createServer(async (req, res) => {
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
 
-server.listen(controlPort, controlHost, () => {
-  console.log(`[engine] Eyevinn Open Live adapter API on ${controlHost}:${controlPort}`);
-  console.log(`[engine] Open Live base: ${openLiveBaseURL}`);
+void (async () => {
+  const skew = await checkClockSkew(ntpCheckURL, ntpCheckTimeoutMs);
+  if (skew == null) {
+    const msg = `[engine][clock] check failed url=${ntpCheckURL}`;
+    if (ntpEnforce) throw new Error(msg);
+    console.warn(msg);
+  } else {
+    console.log(`[engine][clock] skew_ms=${Math.round(skew)} max_skew_ms=${ntpMaxSkewSec * 1000}`);
+    if (skew > ntpMaxSkewSec * 1000) {
+      const msg = `[engine][clock] skew too large skew_ms=${Math.round(skew)} max_skew_ms=${ntpMaxSkewSec * 1000}`;
+      if (ntpEnforce) throw new Error(msg);
+      console.warn(msg);
+    }
+  }
+
+  server.listen(controlPort, controlHost, () => {
+    console.log(`[engine] Eyevinn Open Live adapter API on ${controlHost}:${controlPort}`);
+    console.log(`[engine] Open Live base: ${openLiveBaseURL}`);
+  });
+
+  if (telemetryEnabled) {
+    sendTelemetryLoop().catch((err) => console.error(`[engine][telemetry] fatal ${String(err)}`));
+  } else {
+    console.log("[engine][telemetry] disabled");
+  }
+})().catch((err) => {
+  console.error(`[engine] startup fatal: ${String(err)}`);
+  process.exit(1);
 });
 
-if (telemetryEnabled) {
-  sendTelemetryLoop().catch((err) => console.error(`[engine][telemetry] fatal ${String(err)}`));
-} else {
-  console.log("[engine][telemetry] disabled");
+async function checkClockSkew(url: string, timeoutMs: number): Promise<number | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const started = Date.now();
+    const headers: Record<string, string> = {};
+    if (cfAccessClientID && cfAccessClientSecret) {
+      headers["Cf-Access-Client-Id"] = cfAccessClientID;
+      headers["Cf-Access-Client-Secret"] = cfAccessClientSecret;
+    }
+    const res = await fetch(url, { method: "HEAD", signal: controller.signal, headers });
+    clearTimeout(timeout);
+    const dateHeader = String(res.headers.get("date") ?? "").trim();
+    if (!dateHeader) return null;
+    const remote = Date.parse(dateHeader);
+    if (!Number.isFinite(remote)) return null;
+    // Approximate midpoint to reduce one-way latency impact.
+    const midpoint = (started + Date.now()) / 2;
+    return Math.abs(midpoint - remote);
+  } catch {
+    return null;
+  }
 }
 
 function resolveIssuer(teamDomain: string): string {
