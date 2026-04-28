@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"vbs/apps/console_backend/internal/showconfig"
+	"vbs/pkg/showconfig"
 
 	_ "modernc.org/sqlite"
 )
