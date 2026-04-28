@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useSwitcherStore } from '../stores/switcherStore'
+import { useShowConfigStore } from '../stores/showConfigStore'
 import Switcher from '../components/Switcher'
 import Multiviewer from '../components/Multiviewer'
 import { ExternalLink, Wifi, WifiOff } from 'lucide-react'
@@ -7,12 +8,17 @@ import PageShell from '../components/PageShell'
 
 export default function SwitcherPage() {
   const { state, fetchState, error } = useSwitcherStore()
+  const { draft, fetch: fetchShowConfig, updateDraft, saveDraft, applyDraft, saving, applying } = useShowConfigStore()
   
   const containerRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(60)
   const [isDragging, setIsDragging] = useState(false)
+  const [activeCell, setActiveCell] = useState<number | null>(0)
 
-  useEffect(() => { fetchState() }, [fetchState])
+  useEffect(() => {
+    fetchState()
+    fetchShowConfig()
+  }, [fetchState, fetchShowConfig])
 
   const openPopout = (path: string, name: string) => {
     window.open(path, name, 'width=1000,height=600,menubar=no,toolbar=no,location=no,status=no')
@@ -51,6 +57,18 @@ export default function SwitcherPage() {
   }, [isDragging, handleMouseMove, handleMouseUp])
 
   const isConnected = !error
+  const inputLabels = Array.from(
+    { length: 8 },
+    (_, i) => draft?.sources?.find((s) => s.slot_id === `input${i + 1}`)?.display_name || `Source${i + 1}`
+  )
+  const cellSources = Array.from(
+    { length: 8 },
+    (_, i) => String((draft?.multiview?.cells as any[])?.[i]?.source ?? `input${i + 1}`)
+  )
+  const buttonMappings = Array.from(
+    { length: 8 },
+    (_, i) => String(((draft?.switcher?.rows as any[])?.[0]?.buttons ?? [])[i]?.source ?? `input${i + 1}`)
+  )
 
   return (
     <PageShell 
@@ -74,16 +92,49 @@ export default function SwitcherPage() {
         <div className="flex-1 xl:flex-none xl:w-[var(--left-width)] flex flex-col gap-3 min-w-0 min-h-0 xl:pr-4 pb-4 xl:pb-0">
           <div className="flex items-center justify-between shrink-0">
             <span className="text-[12px] font-black text-vbs-muted uppercase tracking-widest">MultiView Monitor</span>
-            <button
-              onClick={() => openPopout('/popout/multiviewer', 'mutiview_popout')}
-              className="text-vbs-accent hover:text-vbs-accent/70 transition-colors flex items-center gap-1 text-[11px] font-black uppercase tracking-widest"
-            >
-              <ExternalLink className="w-3 h-3" />
-              <span>彈出視窗</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  const okSave = await saveDraft()
+                  if (!okSave) return alert('Multiview Mapping 儲存失敗')
+                  const okApply = await applyDraft()
+                  if (!okApply) return alert('Multiview Mapping 套用失敗')
+                  alert('Multiview Mapping 已套用')
+                }}
+                disabled={saving || applying}
+                className="text-white border border-white/10 bg-white/5 px-2 py-1 rounded text-[11px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                套用 Mapping
+              </button>
+              <button
+                onClick={() => openPopout('/popout/multiviewer', 'mutiview_popout')}
+                className="text-vbs-accent hover:text-vbs-accent/70 transition-colors flex items-center gap-1 text-[11px] font-black uppercase tracking-widest"
+              >
+                <ExternalLink className="w-3 h-3" />
+                <span>彈出視窗</span>
+              </button>
+            </div>
           </div>
           <div className="flex-1 min-h-0 glass rounded-[24px] p-2 overflow-hidden shadow-inner">
-            <Multiviewer pgm={state.program} pvw={state.preview} fullScreen />
+            <Multiviewer
+              pgm={state.program}
+              pvw={state.preview}
+              fullScreen
+              editable
+              inputLabels={inputLabels}
+              cellSources={cellSources}
+              buttonMappings={buttonMappings}
+              activeCellIndex={activeCell}
+              onActiveCellChange={setActiveCell}
+              onCellSourceChange={(cellIndex, source) => {
+                updateDraft((old) => {
+                  const cells = [...(((old.multiview?.cells as any[]) ?? []))]
+                  while (cells.length < 8) cells.push({ source: `input${cells.length + 1}` })
+                  cells[cellIndex] = { ...cells[cellIndex], source }
+                  return { ...old, multiview: { ...old.multiview, cells } }
+                })
+              }}
+            />
           </div>
         </div>
 
@@ -119,4 +170,4 @@ export default function SwitcherPage() {
       </div>
     </PageShell>
   )
-}
+}

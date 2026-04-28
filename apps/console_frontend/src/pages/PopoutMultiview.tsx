@@ -5,7 +5,7 @@ import { useShowConfigStore } from '../stores/showConfigStore'
 
 export default function PopoutMultiview() {
   const { state, fetchState } = useSwitcherStore()
-  const { draft, fetch, updateDraft } = useShowConfigStore()
+  const { draft, fetch, updateDraft, saveDraft, applyDraft, saving, applying } = useShowConfigStore()
   const [activeCell, setActiveCell] = useState<number | null>(0)
 
   useEffect(() => {
@@ -30,6 +30,19 @@ export default function PopoutMultiview() {
     <div className="w-screen h-screen bg-[#050508] overflow-hidden flex flex-col p-2 gap-2">
       <div className="flex items-center justify-between shrink-0">
         <h2 className="text-[14px] font-black text-vbs-muted uppercase tracking-widest">MutiView</h2>
+        <button
+          onClick={async () => {
+            const okSave = await saveDraft()
+            if (!okSave) return alert('儲存失敗')
+            const okApply = await applyDraft()
+            if (!okApply) return alert('套用失敗')
+            alert('Multiview Mapping 已套用')
+          }}
+          disabled={saving || applying}
+          className="text-white border border-white/10 bg-white/5 px-2 py-1 rounded text-[11px] font-black uppercase tracking-widest disabled:opacity-50"
+        >
+          套用 Mapping
+        </button>
       </div>
       <div className="flex-1 overflow-hidden">
         <Multiviewer

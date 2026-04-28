@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Network, Activity, Save, Upload, RotateCcw, Link2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Network, Activity, RotateCcw, Link2 } from 'lucide-react'
 import { useShowConfigStore } from '../stores/showConfigStore'
 import { useRuntimeStore } from '../stores/runtimeStore'
 import { putRuntimeConfig, postSessionKey } from '../lib/apiClient'
@@ -41,6 +41,15 @@ export default function PipelinePage() {
   const sourceOptions = Array.from({ length: 8 }, (_, i) => `input${i + 1}`)
   const currentAuxCount = Math.max(0, Math.min(4, runtime?.aux_count ?? 0))
   const currentPGMCount = Math.max(1, runtime?.pgm_count ?? 1)
+  const [pendingPGMCount, setPendingPGMCount] = useState(currentPGMCount)
+  const [pendingAUXCount, setPendingAUXCount] = useState(currentAuxCount)
+  const [pendingAuxSources, setPendingAuxSources] = useState<Record<string, string>>(runtime?.aux_sources ?? {})
+
+  useEffect(() => {
+    setPendingPGMCount(currentPGMCount)
+    setPendingAUXCount(currentAuxCount)
+    setPendingAuxSources(runtime?.aux_sources ?? {})
+  }, [currentPGMCount, currentAuxCount, runtime?.aux_sources])
 
   const setInputLabel = (slot: number, label: string) => {
     const key = `input${slot}`
@@ -113,6 +122,20 @@ export default function PipelinePage() {
     alert(`${stream.toUpperCase()} SRT 已複製:\n${srt}`)
   }
 
+  const applySectionDraft = async (name: string) => {
+    const okSave = await saveDraft()
+    if (!okSave) {
+      alert(`${name} 儲存失敗`)
+      return
+    }
+    const okApply = await applyDraft()
+    if (!okApply) {
+      alert(`${name} 套用失敗`)
+      return
+    }
+    alert(`${name} 已套用`)
+  }
+
   return (
     <PageShell
       title="鏈路"
@@ -150,6 +173,15 @@ export default function PipelinePage() {
               </div>
             </div>
           </div>
+          <div className="flex justify-end">
+            <button
+              onClick={() => applySectionDraft('畫質/FPS')}
+              disabled={saving || applying}
+              className="text-[11px] font-black uppercase tracking-widest px-3 py-2 rounded-lg border border-vbs-pvw/40 bg-vbs-pvw/10 text-vbs-pvw disabled:opacity-50"
+            >
+              套用本區
+            </button>
+          </div>
         </div>
 
         <div className="md:col-span-8 glass rounded-[32px] p-8 shadow-xl flex flex-col gap-6">
@@ -176,6 +208,15 @@ export default function PipelinePage() {
               )
             })}
           </div>
+          <div className="flex justify-end">
+            <button
+              onClick={() => applySectionDraft('Input Label')}
+              disabled={saving || applying}
+              className="text-[11px] font-black uppercase tracking-widest px-3 py-2 rounded-lg border border-vbs-pvw/40 bg-vbs-pvw/10 text-vbs-pvw disabled:opacity-50"
+            >
+              套用本區
+            </button>
+          </div>
         </div>
 
         <div className="md:col-span-6 glass rounded-[32px] p-8 shadow-xl flex flex-col gap-4">
@@ -185,8 +226,8 @@ export default function PipelinePage() {
             <input
               type="number"
               min={1}
-              value={currentPGMCount}
-              onChange={(e) => saveRuntimeRouting(Number(e.target.value), currentAuxCount, runtime?.aux_sources ?? {})}
+              value={pendingPGMCount}
+              onChange={(e) => setPendingPGMCount(Number(e.target.value) || 1)}
               className="w-20 glass-dark border border-white/10 rounded px-2 py-1 text-white"
             />
             <button onClick={() => generateSrtURL('pgm')} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-white/10 bg-white/5 text-white">
@@ -199,19 +240,19 @@ export default function PipelinePage() {
               type="number"
               min={0}
               max={4}
-              value={currentAuxCount}
-              onChange={(e) => saveRuntimeRouting(currentPGMCount, Number(e.target.value), runtime?.aux_sources ?? {})}
+              value={pendingAUXCount}
+              onChange={(e) => setPendingAUXCount(Number(e.target.value) || 0)}
               className="w-20 glass-dark border border-white/10 rounded px-2 py-1 text-white"
             />
           </div>
-          {Array.from({ length: currentAuxCount }, (_, i) => i + 1).map((ch) => (
+          {Array.from({ length: pendingAUXCount }, (_, i) => i + 1).map((ch) => (
             <div key={`aux-${ch}`} className="flex items-center gap-2">
               <span className="w-14 text-[11px] text-vbs-muted">{`AUX${ch}`}</span>
               <select
-                value={runtime?.aux_sources?.[String(ch)] ?? `input${ch}`}
+                value={pendingAuxSources[String(ch)] ?? `input${ch}`}
                 onChange={(e) => {
-                  const next = { ...(runtime?.aux_sources ?? {}), [String(ch)]: e.target.value }
-                  saveRuntimeRouting(currentPGMCount, currentAuxCount, next)
+                  const next = { ...pendingAuxSources, [String(ch)]: e.target.value }
+                  setPendingAuxSources(next)
                 }}
                 className="flex-1 glass-dark border border-white/10 rounded px-2 py-1 text-white"
               >
@@ -222,6 +263,14 @@ export default function PipelinePage() {
               </button>
             </div>
           ))}
+          <div className="flex justify-end">
+            <button
+              onClick={() => saveRuntimeRouting(pendingPGMCount, pendingAUXCount, pendingAuxSources)}
+              className="text-[11px] font-black uppercase tracking-widest px-3 py-2 rounded-lg border border-vbs-pvw/40 bg-vbs-pvw/10 text-vbs-pvw"
+            >
+              套用本區
+            </button>
+          </div>
         </div>
 
         <div className="md:col-span-6 glass rounded-[32px] p-8 shadow-xl flex flex-col gap-4">
@@ -239,18 +288,20 @@ export default function PipelinePage() {
               </select>
             </div>
           ))}
+          <div className="flex justify-end">
+            <button
+              onClick={() => applySectionDraft('導播按鈕 Mapping')}
+              disabled={saving || applying}
+              className="text-[11px] font-black uppercase tracking-widest px-3 py-2 rounded-lg border border-vbs-pvw/40 bg-vbs-pvw/10 text-vbs-pvw disabled:opacity-50"
+            >
+              套用本區
+            </button>
+          </div>
         </div>
-
-        <div className="md:col-span-12 flex items-center justify-end gap-3">
+        <div className="md:col-span-12 flex items-center justify-between">
           {runtime && <span className="text-[11px] text-vbs-muted">runtime inputs={runtime.inputs} capture={runtime.capture_inputs ?? 0} other={runtime.other_inputs ?? 0}</span>}
-          <button onClick={saveDraft} disabled={saving} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-white disabled:opacity-50">
-            <Save className="w-4 h-4" /> 儲存 Draft
-          </button>
-          <button onClick={applyDraft} disabled={applying} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-vbs-pvw/40 bg-vbs-pvw/10 text-vbs-pvw disabled:opacity-50">
-            <Upload className="w-4 h-4" /> 套用
-          </button>
           <button onClick={rollback} disabled={applying} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-vbs-pgm/40 bg-vbs-pgm/10 text-vbs-pgm disabled:opacity-50">
-            <RotateCcw className="w-4 h-4" /> 回滾
+            <RotateCcw className="w-4 h-4" /> 回滾上一版
           </button>
         </div>
       </div>

@@ -64,10 +64,10 @@ export default function Multiviewer({
         {/* The 4x4 Grid which naturally forms a 16:9 ratio (4 cols * 16 = 64, 4 rows * 9 = 36 -> 16:9 aspect) */}
         <div className="grid grid-cols-4 grid-rows-4 gap-0.5 sm:gap-1 max-w-full max-h-full" style={{ aspectRatio: '16/9', height: '100%' }}>
           <div className="col-span-2 row-span-2 relative">
-            <ViewCell cell={pvwCell} isPvw={true} isLarge={true} labelOverride="PVW" />
+            <ViewCell cell={pvwCell} isPvw={true} isLarge={true} labelOverride={`PVW · ${pvwCell.label}`} />
           </div>
           <div className="col-span-2 row-span-2 relative">
-            <ViewCell cell={pgmCell} isPgm={true} isLarge={true} labelOverride="PGM" />
+            <ViewCell cell={pgmCell} isPgm={true} isLarge={true} labelOverride={`PGM · ${pgmCell.label}`} />
           </div>
           {mappedCells.map((cell, idx) => (
             <div key={cell.id} className="col-span-1 row-span-1">
