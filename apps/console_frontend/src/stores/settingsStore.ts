@@ -4,8 +4,8 @@ import type { AppSettings } from '../types'
 
 const DEFAULT: AppSettings = {
   // Production frontend domain: vbs.cyblisswisdom.org
-  // Production API domain: vbsapi.cyblisswisdom.org
-  apiBaseUrl: 'https://vbsapi.cyblisswisdom.org',
+  // BFF proxy base on same-origin console backend
+  apiBaseUrl: '/api/proxy',
   engineBaseUrl: 'https://vbsswitcher.cyblisswisdom.org',
   routeBaseUrl: '',
   refreshInterval: 1000,

@@ -47,6 +47,10 @@ type Config struct {
 	CaptureControlBaseURL    string
 	CaptureAccessClientID    string
 	CaptureAccessClientSecret string
+
+	BFFProxyBaseURL          string
+	BFFProxyAccessClientID   string
+	BFFProxyAccessClientSecret string
 }
 
 // Load reads configuration from environment variables.
@@ -144,6 +148,9 @@ func Load() (*Config, error) {
 		CaptureControlBaseURL: strings.TrimSpace(os.Getenv("VBS_CAPTURE_CONTROL_BASE_URL")),
 		CaptureAccessClientID: strings.TrimSpace(os.Getenv("VBS_CAPTURE_ACCESS_CLIENT_ID")),
 		CaptureAccessClientSecret: strings.TrimSpace(os.Getenv("VBS_CAPTURE_ACCESS_CLIENT_SECRET")),
+		BFFProxyBaseURL: strings.TrimSpace(getenvDefault("VBS_BFF_PROXY_BASE_URL", "https://vbsapi.cyblisswisdom.org")),
+		BFFProxyAccessClientID: strings.TrimSpace(os.Getenv("VBS_BFF_PROXY_ACCESS_CLIENT_ID")),
+		BFFProxyAccessClientSecret: strings.TrimSpace(os.Getenv("VBS_BFF_PROXY_ACCESS_CLIENT_SECRET")),
 	}, nil
 }
 

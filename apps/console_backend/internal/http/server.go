@@ -4,13 +4,14 @@ package httpserver
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ import (
 )
 
 const maxTokenBodyBytes = 4096
+const maxProxyBodyBytes = 1 << 20
 
 // Server is the console HTTP server.
 type Server struct {
@@ -162,6 +164,7 @@ func (s *Server) isAllowedOrigin(origin string) bool {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("/api/proxy/", s.handleBFFProxy)
 	s.mux.HandleFunc("GET /api/v1/auth/session", s.handleAuthSession)
 	s.mux.HandleFunc("POST /api/v1/auth/admin/email-login", s.handleAdminEmailLogin)
 	s.mux.HandleFunc("GET /vbs/telemetry/ws", s.handleTelemetryWS)
@@ -187,6 +190,78 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/show-config/apply", s.handleShowConfigApply)
 	s.mux.HandleFunc("POST /api/v1/show-config/rollback", s.handleShowConfigRollback)
 	s.mux.HandleFunc("GET /api/v1/show-config/history", s.handleShowConfigHistory)
+}
+
+func (s *Server) handleBFFProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.controlAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	base := strings.TrimSpace(s.cfg.BFFProxyBaseURL)
+	if base == "" {
+		http.Error(w, `{"error":"VBS_BFF_PROXY_BASE_URL not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	trimmedPath := strings.TrimPrefix(r.URL.Path, "/api/proxy")
+	if trimmedPath == r.URL.Path || trimmedPath == "" {
+		http.Error(w, `{"error":"invalid proxy path"}`, http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(trimmedPath, "/api/v1/") && trimmedPath != "/healthz" {
+		http.Error(w, `{"error":"forbidden proxy target"}`, http.StatusForbidden)
+		return
+	}
+	upstreamURL, err := url.Parse(strings.TrimRight(base, "/") + trimmedPath)
+	if err != nil {
+		http.Error(w, `{"error":"invalid proxy target"}`, http.StatusInternalServerError)
+		return
+	}
+	upstreamURL.RawQuery = r.URL.RawQuery
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxProxyBodyBytes))
+	if err != nil {
+		http.Error(w, `{"error":"read proxy body failed"}`, http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), strings.NewReader(string(body)))
+	if err != nil {
+		http.Error(w, `{"error":"build proxy request failed"}`, http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if authz := strings.TrimSpace(r.Header.Get("Authorization")); authz != "" {
+		req.Header.Set("Authorization", authz)
+	}
+	if accept := strings.TrimSpace(r.Header.Get("Accept")); accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	s.attachBFFProxyServiceToken(req)
+
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"bff proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyBodyBytes))
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"bff proxy read failed: %s"}`, trimErr(err)), http.StatusBadGateway)
+		return
+	}
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(raw)
 }
 
 func (s *Server) handleAdminEmailLogin(w http.ResponseWriter, r *http.Request) {
@@ -1146,4 +1221,17 @@ func (s *Server) attachCaptureServiceToken(req *http.Request) {
 	if secret != "" {
 		req.Header.Set("Cf-Access-Client-Secret", secret)
 	}
+}
+
+func (s *Server) attachBFFProxyServiceToken(req *http.Request) {
+	if req == nil {
+		return
+	}
+	id := strings.TrimSpace(s.cfg.BFFProxyAccessClientID)
+	secret := strings.TrimSpace(s.cfg.BFFProxyAccessClientSecret)
+	if id == "" || secret == "" {
+		return
+	}
+	req.Header.Set("Cf-Access-Client-Id", id)
+	req.Header.Set("Cf-Access-Client-Secret", secret)
 }

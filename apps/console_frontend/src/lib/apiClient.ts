@@ -55,9 +55,22 @@ let adminRefreshInFlight: Promise<boolean> | null = null
 
 function resolveApiBase(rawBase: string): string {
   const trimmed = rawBase.trim()
-  if (!trimmed) return 'https://vbsapi.cyblisswisdom.org'
-  if (trimmed === 'https://vbs.cyblisswisdom.org') return 'https://vbsapi.cyblisswisdom.org'
+  if (!trimmed) return '/api/proxy'
+  if (trimmed === 'https://vbs.cyblisswisdom.org') return '/api/proxy'
+  if (trimmed === 'https://vbsapi.cyblisswisdom.org') return '/api/proxy'
   return trimmed
+}
+
+function isDirectConsolePath(path: string): boolean {
+  return (
+    path === '/api/v1/auth/admin/email-login' ||
+    path === '/api/v1/guest/exchange-pin'
+  )
+}
+
+function resolveRequestURL(apiBase: string, path: string): string {
+  if (isDirectConsolePath(path)) return path
+  return `${apiBase}${path}`
 }
 
 export async function request<T>(
@@ -70,12 +83,13 @@ export async function request<T>(
   const start = performance.now()
 
   try {
-    const first = await performFetch(method, `${apiBase}${path}`, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
+    const firstURL = resolveRequestURL(apiBase, path)
+    const first = await performFetch(method, firstURL, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
     const latencyMs = Math.round(performance.now() - start)
     if (first.status === 401) {
       const refreshed = await tryRefreshAdminToken(apiBase, settings.apiTimeoutMs)
       if (refreshed) {
-        const second = await performFetch(method, `${apiBase}${path}`, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
+        const second = await performFetch(method, firstURL, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
         if (!second.ok) {
           return {
             error: second.data?.error ?? second.data?.message ?? `HTTP ${second.status}`,
@@ -139,7 +153,7 @@ async function tryRefreshAdminToken(apiBase: string, timeoutMs: number): Promise
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const res = await fetch(`${apiBase}/api/v1/auth/admin/email-login`, {
+      const res = await fetch('/api/v1/auth/admin/email-login', {
         method: 'POST',
         signal: controller.signal,
         credentials: 'include',
