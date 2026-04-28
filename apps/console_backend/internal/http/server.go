@@ -265,13 +265,8 @@ func (s *Server) handleBFFProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminEmailLogin(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.access.VerifyRequest(r)
-	if err != nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-	if !auth.IsAdminRole(claims.Role) {
-		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 	var body struct {
@@ -286,10 +281,11 @@ func (s *Server) handleAdminEmailLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"email required"}`, http.StatusBadRequest)
 		return
 	}
-	if claims.Email == "" || !strings.EqualFold(strings.TrimSpace(claims.Email), email) {
-		http.Error(w, `{"error":"email mismatch with access identity"}`, http.StatusForbidden)
+	if !containsNormalizedEmail(s.cfg.AdminEmails, email) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+	var err error
 	ttl := 8 * time.Hour
 	token, err := s.access.MintAdminToken("admin:"+email, ttl)
 	if err != nil {
@@ -304,6 +300,19 @@ func (s *Server) handleAdminEmailLogin(w http.ResponseWriter, r *http.Request) {
 		"role": "admin",
 		"email": email,
 	})
+}
+
+func containsNormalizedEmail(allow []string, email string) bool {
+	needle := strings.TrimSpace(strings.ToLower(email))
+	if needle == "" {
+		return false
+	}
+	for _, v := range allow {
+		if strings.EqualFold(strings.TrimSpace(v), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleAuthSession returns current authenticated session role for UI gating.
