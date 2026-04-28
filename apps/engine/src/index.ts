@@ -15,16 +15,7 @@ interface RuntimeConfig {
   inputs: number;
   pgm_count: number;
   aux_count: number;
-  input_sources?: string[];
   aux_sources?: Record<string, string>;
-}
-
-interface OpenLiveSource {
-  id: string;
-  name?: string;
-  streamType?: string;
-  stream_type?: string;
-  address?: string;
 }
 
 interface OpenLiveProduction {
@@ -89,6 +80,7 @@ let runtimeConfig: RuntimeConfig = {
   aux_count: 4,
 };
 let activeProductionID = "";
+let pgmOutputState: { enabled: boolean; url: string } = { enabled: false, url: "" };
 
 function env(name: string, defaultValue: string): string {
   return (process.env[name] ?? defaultValue).trim();
@@ -175,10 +167,6 @@ function sourceIDForInput(index: number): string {
   return `vbs-${inputKey(index)}`;
 }
 
-function sourceNameForInput(index: number): string {
-  return `VBS ${inputKey(index)}`;
-}
-
 function mixerInputForAux(channel: string): string {
   return `${openLiveAuxInputPrefix}${channel}`;
 }
@@ -215,43 +203,6 @@ async function ensureProduction(): Promise<string> {
   activeProductionID = String(createdByName?.id ?? "").trim();
   if (!activeProductionID) throw new Error("open live create production missing id");
   return activeProductionID;
-}
-
-async function listOpenLiveSources(): Promise<OpenLiveSource[]> {
-  const raw = await openLiveJSON<OpenLiveListResponse<OpenLiveSource>>("/api/v1/sources");
-  return asArray(raw);
-}
-
-async function ensureSource(index: number, address: string): Promise<string> {
-  const id = sourceIDForInput(index);
-  const all = await listOpenLiveSources();
-  const found = all.find((s) => String(s.id) === id);
-  const payload = {
-    id,
-    name: sourceNameForInput(index),
-    streamType: "srt",
-    address,
-  };
-  if (!found) {
-    const create = await openLiveSend("/api/v1/sources", "POST", payload);
-    if (!create.ok) {
-      const raw = await create.text();
-      throw new Error(`open live create source status=${create.status} body=${raw.slice(0, 200)}`);
-    }
-    return id;
-  }
-  const currentAddress = String(found.address ?? "");
-  const currentType = String(found.streamType ?? found.stream_type ?? "").toLowerCase();
-  if (currentAddress === address && (currentType === "srt" || currentType === "")) return id;
-  const patch = await openLiveSend(`/api/v1/sources/${encodeURIComponent(id)}`, "PATCH", {
-    address,
-    streamType: "srt",
-  });
-  if (!patch.ok) {
-    const raw = await patch.text();
-    throw new Error(`open live patch source status=${patch.status} body=${raw.slice(0, 200)}`);
-  }
-  return id;
 }
 
 async function assignProductionInput(productionID: string, mixerInput: string, sourceID: string): Promise<void> {
@@ -362,16 +313,6 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
   if (!Number.isInteger(next.aux_count) || next.aux_count < 0 || next.aux_count > 4) {
     throw new Error("aux_count must be integer between 0 and 4");
   }
-  if (next.input_sources && next.input_sources.length > 8) {
-    throw new Error("input_sources cannot exceed 8 entries");
-  }
-  const sourceList = next.input_sources ?? [];
-  for (let i = 0; i < sourceList.length; i += 1) {
-    const src = String(sourceList[i] ?? "").trim();
-    if (!src) throw new Error(`input_sources[${i}] is empty`);
-    if (!src.startsWith("srt://")) throw new Error(`input_sources[${i}] must be srt:// URI`);
-  }
-
   if (next.aux_sources) {
     for (const [ch, srcRaw] of Object.entries(next.aux_sources)) {
       if (!["1", "2", "3", "4"].includes(ch)) throw new Error("aux_sources keys must be 1..4");
@@ -382,9 +323,6 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
   }
 
   const productionID = await ensureProduction();
-  for (let i = 0; i < sourceList.length; i += 1) {
-    await ensureSource(i + 1, sourceList[i]);
-  }
   await activateProduction(productionID);
   // Apply selected buses to Open Live production mapping.
   await assignProductionInput(productionID, openLiveProgramInput, sourceIDFromSelection(state.program || "input1"));
@@ -407,7 +345,6 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
     inputs: next.inputs,
     pgm_count: next.pgm_count,
     aux_count: next.aux_count,
-    input_sources: next.input_sources?.map((s) => String(s)),
     aux_sources: next.aux_sources ? { ...next.aux_sources } : undefined,
   };
   try {
@@ -552,7 +489,6 @@ const server = createServer(async (req, res) => {
         inputs: Number(body.inputs),
         pgm_count: Number(body.pgm_count),
         aux_count: Number(body.aux_count),
-        input_sources: body.input_sources,
         aux_sources: body.aux_sources,
       });
       writeJson(res, 200, { applied: true, config: applied, state });
@@ -577,6 +513,26 @@ const server = createServer(async (req, res) => {
       } catch (e) {
         writeJson(res, 400, { error: String(e) });
       }
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/v1/engine/reset") {
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
+      activeProductionID = "";
+      await ensureProduction();
+      writeJson(res, 200, { applied: true, action: "engine_reset" });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/v1/engine/pgm/output") {
+      if (!(await authorized(req))) return writeJson(res, 401, { error: "unauthorized" });
+      const body = await readBody(req);
+      const enabled = Boolean(body.enabled);
+      const url = String(body.url ?? "").trim();
+      pgmOutputState = { enabled, url };
+      writeJson(res, 200, {
+        applied: true,
+        action: "pgm_output",
+        output: pgmOutputState,
+      });
       return;
     }
     if (req.method === "POST" && req.url === "/api/v1/switch/program") {

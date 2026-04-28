@@ -18,14 +18,14 @@ type Config struct {
 	LogLevel      string
 
 	// Console 控制平面（HTTPS 基底網址，用於衍生 WSS 遙測 URL）
-	ConsoleBaseURL string
-	CFAccessClientID    string
+	ConsoleBaseURL       string
+	CFAccessClientID     string
 	CFAccessClientSecret string
-	CFAccessTeamDomain  string
-	CFAccessAUD         string
-	CFAccessJWKSURL     string
+	CFAccessTeamDomain   string
+	CFAccessAUD          string
+	CFAccessJWKSURL      string
 	CFAccessJWKSCacheTTL time.Duration
-	NodeCNPrefix        string
+	NodeCNPrefix         string
 
 	// WSS 遙測路徑（相對於 Console 主機），預設見 Load。
 	TelemetryWSPath string
@@ -59,11 +59,12 @@ type Config struct {
 	PGMRelayPublicPort    int
 	PGMRelayLatencyMs     int
 
-	NTPCheckURL     string
-	NTPCheckTimeout time.Duration
-	NTPMaxSkew      time.Duration
-	NTPEnforce      bool
+	NTPCheckURL        string
+	NTPCheckTimeout    time.Duration
+	NTPMaxSkew         time.Duration
+	NTPEnforce         bool
 	JWTClockSkewLeeway time.Duration
+	ExternalInputs     []string
 }
 
 const (
@@ -71,16 +72,16 @@ const (
 	envSRTPassphrase = "VBS_SRT_PASSPHRASE"
 	envLogLevel      = "VBS_LOG_LEVEL"
 
-	envConsoleBaseURL = "VBS_CONSOLE_BASE_URL"
-	envCFAccessClientID = "VBS_CF_ACCESS_CLIENT_ID"
+	envConsoleBaseURL       = "VBS_CONSOLE_BASE_URL"
+	envCFAccessClientID     = "VBS_CF_ACCESS_CLIENT_ID"
 	envCFAccessClientSecret = "VBS_CF_ACCESS_CLIENT_SECRET"
-	envCFAccessTeamDomain = "VBS_CF_ACCESS_TEAM_DOMAIN"
-	envCFAccessAUD = "VBS_CF_ACCESS_AUD"
-	envCFAccessJWKSURL = "VBS_CF_ACCESS_JWKS_URL"
+	envCFAccessTeamDomain   = "VBS_CF_ACCESS_TEAM_DOMAIN"
+	envCFAccessAUD          = "VBS_CF_ACCESS_AUD"
+	envCFAccessJWKSURL      = "VBS_CF_ACCESS_JWKS_URL"
 	envCFAccessJWKSCacheTTL = "VBS_CF_JWKS_CACHE_TTL_SEC"
-	envNodeCNPrefix = "VBS_NODE_CN_PREFIX"
-	envTelemetryPath  = "VBS_ROUTE_TELEMETRY_WS_PATH"
-	envTLSInsecure    = "VBS_ROUTE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY"
+	envNodeCNPrefix         = "VBS_NODE_CN_PREFIX"
+	envTelemetryPath        = "VBS_ROUTE_TELEMETRY_WS_PATH"
+	envTLSInsecure          = "VBS_ROUTE_TELEMETRY_TLS_INSECURE_SKIP_VERIFY"
 
 	envMetricsInterval = "VBS_METRICS_INTERVAL"
 
@@ -106,6 +107,7 @@ const (
 	envNTPMaxSkewSec         = "VBS_NTP_MAX_SKEW_SEC"
 	envNTPEnforce            = "VBS_NTP_ENFORCE"
 	envJWTClockSkewSec       = "VBS_JWT_CLOCK_SKEW_SEC"
+	envExternalInputs        = "VBS_ROUTE_EXTERNAL_INPUTS"
 )
 
 // Load 讀取環境變數。
@@ -115,14 +117,14 @@ func Load() Config {
 		SRTPassphrase: os.Getenv(envSRTPassphrase),
 		LogLevel:      getenvOrDefault(envLogLevel, "info"),
 
-		ConsoleBaseURL: strings.TrimSpace(os.Getenv(envConsoleBaseURL)),
-		CFAccessClientID: strings.TrimSpace(os.Getenv(envCFAccessClientID)),
+		ConsoleBaseURL:       strings.TrimSpace(os.Getenv(envConsoleBaseURL)),
+		CFAccessClientID:     strings.TrimSpace(os.Getenv(envCFAccessClientID)),
 		CFAccessClientSecret: strings.TrimSpace(os.Getenv(envCFAccessClientSecret)),
-		CFAccessTeamDomain: strings.TrimSpace(os.Getenv(envCFAccessTeamDomain)),
-		CFAccessAUD: strings.TrimSpace(os.Getenv(envCFAccessAUD)),
-		CFAccessJWKSURL: strings.TrimSpace(os.Getenv(envCFAccessJWKSURL)),
-		NodeCNPrefix: strings.TrimSpace(strings.ToLower(getenvOrDefault(envNodeCNPrefix, "vbs-node-"))),
-		TelemetryWSPath: getenvOrDefault(envTelemetryPath, "/vbs/telemetry/ws"),
+		CFAccessTeamDomain:   strings.TrimSpace(os.Getenv(envCFAccessTeamDomain)),
+		CFAccessAUD:          strings.TrimSpace(os.Getenv(envCFAccessAUD)),
+		CFAccessJWKSURL:      strings.TrimSpace(os.Getenv(envCFAccessJWKSURL)),
+		NodeCNPrefix:         strings.TrimSpace(strings.ToLower(getenvOrDefault(envNodeCNPrefix, "vbs-node-"))),
+		TelemetryWSPath:      getenvOrDefault(envTelemetryPath, "/vbs/telemetry/ws"),
 	}
 	cacheTTL := getenvIntOrDefault(envCFAccessJWKSCacheTTL, 3600)
 	if cacheTTL < 60 {
@@ -169,6 +171,7 @@ func Load() Config {
 	cfg.NTPMaxSkew = time.Duration(getenvIntOrDefault(envNTPMaxSkewSec, 5)) * time.Second
 	cfg.NTPEnforce = parseBool(getenvOrDefault(envNTPEnforce, "1"))
 	cfg.JWTClockSkewLeeway = time.Duration(getenvIntOrDefault(envJWTClockSkewSec, 30)) * time.Second
+	cfg.ExternalInputs = splitCSVRaw(os.Getenv(envExternalInputs))
 
 	return cfg
 }

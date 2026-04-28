@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,16 +30,16 @@ const maxProxyBodyBytes = 1 << 20
 
 // Server is the console HTTP server.
 type Server struct {
-	cfg    *config.Config
-	access *auth.AccessJWTVerifier
-	hub    *telemetry.Hub
-	http   *http.Server
-	mux    *http.ServeMux
+	cfg      *config.Config
+	access   *auth.AccessJWTVerifier
+	hub      *telemetry.Hub
+	http     *http.Server
+	mux      *http.ServeMux
 	upgrader websocket.Upgrader
 
-	eventMu    sync.Mutex
-	eventConns map[*websocket.Conn]struct{}
-	guestStore *guestStore
+	eventMu      sync.Mutex
+	eventConns   map[*websocket.Conn]struct{}
+	guestStore   *guestStore
 	runtimeStore *runtimeStore
 	showStore    *showConfigStore
 
@@ -58,19 +59,39 @@ type guestSession struct {
 }
 
 type runtimeConfig struct {
-	Inputs      int               `json:"inputs"`
-	PGMCount    int               `json:"pgm_count"`
-	AUXCount    int               `json:"aux_count"`
-	InputSources []string         `json:"input_sources,omitempty"`
-	AUXSources  map[string]string `json:"aux_sources,omitempty"`
+	Inputs     int               `json:"inputs"`
+	PGMCount   int               `json:"pgm_count"`
+	AUXCount   int               `json:"aux_count"`
+	AUXSources map[string]string `json:"aux_sources,omitempty"`
+}
+
+type runtimeInput struct {
+	ID     string `json:"id"`
+	Class  string `json:"class"` // capture | other
+	Label  string `json:"label,omitempty"`
+	Origin string `json:"origin,omitempty"`
+	Online bool   `json:"online"`
+}
+
+type controlError struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func (e *controlError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
 }
 
 // New constructs a Server from config.
 func New(cfg *config.Config) *Server {
 	s := &Server{
-		cfg: cfg,
-		hub: telemetry.NewHub(cfg.NodeOfflineTTL),
-		mux: http.NewServeMux(),
+		cfg:        cfg,
+		hub:        telemetry.NewHub(cfg.NodeOfflineTTL),
+		mux:        http.NewServeMux(),
 		eventConns: make(map[*websocket.Conn]struct{}),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
@@ -80,7 +101,7 @@ func New(cfg *config.Config) *Server {
 			},
 		},
 		runtimeCfg: runtimeConfig{
-			Inputs:   8,
+			Inputs:   1,
 			PGMCount: 1,
 			AUXCount: 4,
 		},
@@ -170,14 +191,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/auth/admin/email-login", s.handleAdminEmailLogin)
 	s.mux.HandleFunc("GET /vbs/telemetry/ws", s.handleTelemetryWS)
 	s.mux.HandleFunc("GET /vbs/telemetry/events/ws", s.handleTelemetryEventsWS)
+	s.mux.HandleFunc("GET /vbs/control/ws", s.handleControlWS)
 	s.mux.HandleFunc("GET /api/v1/telemetry/latest", s.handleTelemetryLatest)
 	s.mux.HandleFunc("POST /api/v1/stream/session-key", s.handleSessionKey)
 	s.mux.HandleFunc("POST /api/v1/pgm/route-buffer", s.handlePGMRouteBuffer)
+	s.mux.HandleFunc("POST /api/v1/capture/bitrate", s.handleCaptureBitrate)
+	s.mux.HandleFunc("POST /api/v1/capture/reboot", s.handleCaptureReboot)
 	s.mux.HandleFunc("GET /api/v1/route/metrics", s.handleRouteMetrics)
 	s.mux.HandleFunc("POST /api/v1/switch/program", s.handleSwitchProgram)
 	s.mux.HandleFunc("POST /api/v1/switch/preview", s.handleSwitchPreview)
 	s.mux.HandleFunc("POST /api/v1/switch/aux", s.handleSwitchAUX)
 	s.mux.HandleFunc("GET /api/v1/switch/state", s.handleSwitchState)
+	s.mux.HandleFunc("POST /api/v1/engine/reset", s.handleEngineReset)
+	s.mux.HandleFunc("POST /api/v1/engine/pgm/output", s.handleEnginePGMOutput)
 	s.mux.HandleFunc("GET /api/v1/guest/sessions", s.handleGuestSessionList)
 	s.mux.HandleFunc("POST /api/v1/guest/sessions", s.handleGuestSessionCreate)
 	s.mux.HandleFunc("DELETE /api/v1/guest/sessions/{id}", s.handleGuestSessionDelete)
@@ -296,10 +322,10 @@ func (s *Server) handleAdminEmailLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": token,
-		"token_type": "Bearer",
-		"expires_at": time.Now().UTC().Add(ttl).Unix(),
-		"role": "admin",
-		"email": email,
+		"token_type":   "Bearer",
+		"expires_at":   time.Now().UTC().Add(ttl).Unix(),
+		"role":         "admin",
+		"email":        email,
 	})
 }
 
@@ -434,9 +460,9 @@ func (s *Server) writeLatest(w http.ResponseWriter) {
 	presence := s.hub.PresenceSnapshot()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"latest":    snap,
-		"presence":  presence,
-		"ts_ms":     time.Now().UTC().UnixMilli(),
+		"latest":   snap,
+		"presence": presence,
+		"ts_ms":    time.Now().UTC().UnixMilli(),
 	})
 }
 
@@ -521,6 +547,126 @@ func (s *Server) handleTelemetryEventsWS(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+func (s *Server) handleControlWS(w http.ResponseWriter, r *http.Request) {
+	if !s.controlAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("control websocket upgrade: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		return nil
+	})
+
+	for {
+		_, payload, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		resp := s.executeControlCommand(payload)
+		_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+		if err := conn.WriteMessage(websocket.TextMessage, resp); err != nil {
+			return
+		}
+	}
+}
+
+func (s *Server) executeControlCommand(raw []byte) []byte {
+	type controlCommand struct {
+		Action  string         `json:"action"`
+		Payload map[string]any `json:"payload"`
+	}
+	out := map[string]any{
+		"ok": false,
+	}
+	var cmd controlCommand
+	if err := json.Unmarshal(raw, &cmd); err != nil {
+		out["error"] = "invalid json"
+		b, _ := json.Marshal(out)
+		return b
+	}
+	action := strings.TrimSpace(strings.ToLower(cmd.Action))
+	payload := cmd.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	if verr := validateControlActionPayload(action, payload); verr != nil {
+		out["code"] = verr.Code
+		out["error"] = verr.Message
+		b, _ := json.Marshal(out)
+		return b
+	}
+	callEngine := func(path string) {
+		body, _ := json.Marshal(payload)
+		proxyRaw, status, err := s.engineControlPOST(path, body)
+		if err != nil {
+			out["error"] = trimErr(err)
+			return
+		}
+		out["status"] = status
+		if status >= 400 {
+			out["error"] = fmt.Sprintf("engine status=%d", status)
+		} else {
+			out["ok"] = true
+		}
+		out["response"] = json.RawMessage(proxyRaw)
+	}
+	switch action {
+	case "switch_program":
+		callEngine("/api/v1/switch/program")
+	case "switch_preview":
+		callEngine("/api/v1/switch/preview")
+	case "switch_aux":
+		callEngine("/api/v1/switch/aux")
+	case "engine_reset":
+		callEngine("/api/v1/engine/reset")
+	case "engine_pgm_output":
+		callEngine("/api/v1/engine/pgm/output")
+	case "route_buffer":
+		body, _ := json.Marshal(payload)
+		proxyRaw, status, err := s.routeControlPOST("/api/v1/route/buffer", body)
+		if err != nil {
+			out["error"] = trimErr(err)
+			break
+		}
+		out["status"] = status
+		out["response"] = json.RawMessage(proxyRaw)
+		out["ok"] = status < 400
+	case "capture_bitrate":
+		body, _ := json.Marshal(payload)
+		proxyRaw, status, err := s.captureControlPOST("/api/v1/capture/bitrate", body)
+		if err != nil {
+			out["error"] = trimErr(err)
+			break
+		}
+		out["status"] = status
+		out["response"] = json.RawMessage(proxyRaw)
+		out["ok"] = status < 400
+	case "capture_reboot":
+		body, _ := json.Marshal(payload)
+		proxyRaw, status, err := s.captureControlPOST("/api/v1/capture/reboot", body)
+		if err != nil {
+			out["error"] = trimErr(err)
+			break
+		}
+		out["status"] = status
+		out["response"] = json.RawMessage(proxyRaw)
+		out["ok"] = status < 400
+	default:
+		out["code"] = "unsupported_action"
+		out["error"] = "unsupported action"
+	}
+	b, _ := json.Marshal(out)
+	return b
+}
+
 func (s *Server) fanoutStatusEvents() {
 	events := s.hub.SubscribeStatusEvents()
 	for ev := range events {
@@ -558,6 +704,198 @@ func trimErr(err error) string {
 	return s
 }
 
+func writeControlError(w http.ResponseWriter, err *controlError) {
+	status := http.StatusBadRequest
+	code := "bad_request"
+	msg := "invalid payload"
+	if err != nil {
+		if err.Status > 0 {
+			status = err.Status
+		}
+		if strings.TrimSpace(err.Code) != "" {
+			code = strings.TrimSpace(err.Code)
+		}
+		if strings.TrimSpace(err.Message) != "" {
+			msg = strings.TrimSpace(err.Message)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":      false,
+		"code":    code,
+		"error":   msg,
+		"message": msg,
+	})
+}
+
+func parseControlPayload(raw []byte) (map[string]any, *controlError) {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, &controlError{Status: http.StatusBadRequest, Code: "invalid_json", Message: "invalid json"}
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	return payload, nil
+}
+
+func asInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n == float64(int(n)) {
+			return int(n), true
+		}
+	case int:
+		return n, true
+	case int32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case string:
+		i, err := strconv.Atoi(strings.TrimSpace(n))
+		if err == nil {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func validateSourceValue(source string) bool {
+	s := strings.TrimSpace(source)
+	if s == "" {
+		return false
+	}
+	return strings.HasPrefix(s, "input") ||
+		strings.HasPrefix(s, "srt://") ||
+		strings.HasPrefix(s, "capture:")
+}
+
+func validateSwitchProgramPreviewPayload(payload map[string]any) *controlError {
+	source := strings.TrimSpace(fmt.Sprintf("%v", payload["source"]))
+	if !validateSourceValue(source) {
+		return &controlError{Status: http.StatusBadRequest, Code: "invalid_source", Message: "source must be inputN, capture:* or srt:// URI"}
+	}
+	return nil
+}
+
+func validateSwitchAUXPayload(payload map[string]any) *controlError {
+	channel, ok := asInt(payload["channel"])
+	if !ok || channel < 1 || channel > 4 {
+		return &controlError{Status: http.StatusBadRequest, Code: "invalid_channel", Message: "channel must be 1..4"}
+	}
+	source := strings.TrimSpace(fmt.Sprintf("%v", payload["source"]))
+	if !validateSourceValue(source) {
+		return &controlError{Status: http.StatusBadRequest, Code: "invalid_source", Message: "source must be inputN, capture:* or srt:// URI"}
+	}
+	return nil
+}
+
+func validateRouteBufferPayload(payload map[string]any) *controlError {
+	latRaw, hasLat := payload["latency_ms"]
+	lossRaw, hasLoss := payload["loss_max_ttl"]
+	if !hasLat && !hasLoss {
+		return &controlError{Status: http.StatusBadRequest, Code: "missing_field", Message: "latency_ms or loss_max_ttl is required"}
+	}
+	if hasLat {
+		lat, ok := asInt(latRaw)
+		if !ok || lat <= 0 {
+			return &controlError{Status: http.StatusBadRequest, Code: "invalid_latency_ms", Message: "latency_ms must be positive integer"}
+		}
+	}
+	if hasLoss {
+		loss, ok := asInt(lossRaw)
+		if !ok || loss <= 0 {
+			return &controlError{Status: http.StatusBadRequest, Code: "invalid_loss_max_ttl", Message: "loss_max_ttl must be positive integer"}
+		}
+	}
+	return nil
+}
+
+func validateEnginePGMOutputPayload(payload map[string]any) *controlError {
+	enabledRaw, ok := payload["enabled"]
+	if !ok {
+		return &controlError{Status: http.StatusBadRequest, Code: "missing_field", Message: "enabled is required"}
+	}
+	enabled, ok := enabledRaw.(bool)
+	if !ok {
+		return &controlError{Status: http.StatusBadRequest, Code: "invalid_enabled", Message: "enabled must be boolean"}
+	}
+	url := strings.TrimSpace(fmt.Sprintf("%v", payload["url"]))
+	if enabled && url == "" {
+		return &controlError{Status: http.StatusBadRequest, Code: "missing_field", Message: "url is required when enabled=true"}
+	}
+	return nil
+}
+
+func validateCaptureBitratePayload(payload map[string]any) *controlError {
+	if len(payload) == 0 {
+		return &controlError{Status: http.StatusBadRequest, Code: "missing_field", Message: "payload is required"}
+	}
+	if v, ok := payload["bitrate_kbps"]; ok {
+		bitrate, ok := asInt(v)
+		if !ok || bitrate <= 0 {
+			return &controlError{Status: http.StatusBadRequest, Code: "invalid_bitrate_kbps", Message: "bitrate_kbps must be positive integer"}
+		}
+	}
+	return nil
+}
+
+func validateCaptureRebootPayload(payload map[string]any) *controlError {
+	if len(payload) == 0 {
+		return &controlError{Status: http.StatusBadRequest, Code: "missing_field", Message: "payload is required"}
+	}
+	return nil
+}
+
+func validateControlActionPayload(action string, payload map[string]any) *controlError {
+	switch action {
+	case "switch_program", "switch_preview":
+		return validateSwitchProgramPreviewPayload(payload)
+	case "switch_aux":
+		return validateSwitchAUXPayload(payload)
+	case "engine_reset":
+		if len(payload) != 0 {
+			return &controlError{Status: http.StatusBadRequest, Code: "unexpected_payload", Message: "engine_reset does not accept payload"}
+		}
+		return nil
+	case "engine_pgm_output":
+		return validateEnginePGMOutputPayload(payload)
+	case "route_buffer":
+		return validateRouteBufferPayload(payload)
+	case "capture_bitrate":
+		return validateCaptureBitratePayload(payload)
+	case "capture_reboot":
+		return validateCaptureRebootPayload(payload)
+	default:
+		return &controlError{Status: http.StatusBadRequest, Code: "unsupported_action", Message: "unsupported action"}
+	}
+}
+
+func validateProxyPathPayload(path string, payload map[string]any) *controlError {
+	switch path {
+	case "/api/v1/switch/program", "/api/v1/switch/preview":
+		return validateSwitchProgramPreviewPayload(payload)
+	case "/api/v1/switch/aux":
+		return validateSwitchAUXPayload(payload)
+	case "/api/v1/engine/reset":
+		if len(payload) != 0 {
+			return &controlError{Status: http.StatusBadRequest, Code: "unexpected_payload", Message: "engine reset does not accept payload"}
+		}
+		return nil
+	case "/api/v1/engine/pgm/output":
+		return validateEnginePGMOutputPayload(payload)
+	case "/api/v1/route/buffer":
+		return validateRouteBufferPayload(payload)
+	case "/api/v1/capture/bitrate":
+		return validateCaptureBitratePayload(payload)
+	case "/api/v1/capture/reboot":
+		return validateCaptureRebootPayload(payload)
+	default:
+		return nil
+	}
+}
+
 func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
 	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -569,11 +907,20 @@ func (s *Server) handlePGMRouteBuffer(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
 	if err != nil {
-		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
+		writeControlError(w, &controlError{Status: http.StatusBadRequest, Code: "read_body_failed", Message: "read body"})
 		return
 	}
 	if len(strings.TrimSpace(string(body))) == 0 {
-		http.Error(w, `{"error":"body required"}`, http.StatusBadRequest)
+		writeControlError(w, &controlError{Status: http.StatusBadRequest, Code: "missing_body", Message: "body required"})
+		return
+	}
+	payload, verr := parseControlPayload(body)
+	if verr != nil {
+		writeControlError(w, verr)
+		return
+	}
+	if verr := validateProxyPathPayload("/api/v1/route/buffer", payload); verr != nil {
+		writeControlError(w, verr)
 		return
 	}
 	respBody, status, err := s.routeControlPOST("/api/v1/route/buffer", body)
@@ -634,6 +981,22 @@ func (s *Server) handleSwitchAUX(w http.ResponseWriter, r *http.Request) {
 	s.proxyEngineControl(w, r, "/api/v1/switch/aux")
 }
 
+func (s *Server) handleEngineReset(w http.ResponseWriter, r *http.Request) {
+	s.proxyEngineControl(w, r, "/api/v1/engine/reset")
+}
+
+func (s *Server) handleEnginePGMOutput(w http.ResponseWriter, r *http.Request) {
+	s.proxyEngineControl(w, r, "/api/v1/engine/pgm/output")
+}
+
+func (s *Server) handleCaptureBitrate(w http.ResponseWriter, r *http.Request) {
+	s.proxyCaptureControl(w, r, "/api/v1/capture/bitrate")
+}
+
+func (s *Server) handleCaptureReboot(w http.ResponseWriter, r *http.Request) {
+	s.proxyCaptureControl(w, r, "/api/v1/capture/reboot")
+}
+
 func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
 	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -680,11 +1043,20 @@ func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
 	if err != nil {
-		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
+		writeControlError(w, &controlError{Status: http.StatusBadRequest, Code: "read_body_failed", Message: "read body"})
 		return
 	}
 	if len(strings.TrimSpace(string(body))) == 0 {
-		http.Error(w, `{"error":"body required"}`, http.StatusBadRequest)
+		writeControlError(w, &controlError{Status: http.StatusBadRequest, Code: "missing_body", Message: "body required"})
+		return
+	}
+	payload, verr := parseControlPayload(body)
+	if verr != nil {
+		writeControlError(w, verr)
+		return
+	}
+	if verr := validateProxyPathPayload(path, payload); verr != nil {
+		writeControlError(w, verr)
 		return
 	}
 	base := strings.TrimRight(s.cfg.EngineControlBaseURL, "/")
@@ -713,14 +1085,51 @@ func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path
 	_, _ = w.Write(raw)
 }
 
+func (s *Server) proxyCaptureControl(w http.ResponseWriter, r *http.Request, path string) {
+	if !s.controlAuthorized(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if strings.TrimSpace(s.cfg.CaptureControlBaseURL) == "" {
+		http.Error(w, `{"error":"VBS_CAPTURE_CONTROL_BASE_URL not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBodyBytes))
+	if err != nil {
+		writeControlError(w, &controlError{Status: http.StatusBadRequest, Code: "read_body_failed", Message: "read body"})
+		return
+	}
+	if len(strings.TrimSpace(string(body))) == 0 {
+		writeControlError(w, &controlError{Status: http.StatusBadRequest, Code: "missing_body", Message: "body required"})
+		return
+	}
+	payload, verr := parseControlPayload(body)
+	if verr != nil {
+		writeControlError(w, verr)
+		return
+	}
+	if verr := validateProxyPathPayload(path, payload); verr != nil {
+		writeControlError(w, verr)
+		return
+	}
+	raw, status, err := s.captureControlPOST(path, body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"capture control proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(raw)
+}
+
 func (s *Server) handleGuestSessionCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.adminAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
 	var body struct {
-		Name string `json:"name"`
-		TTLSeconds int `json:"ttl_seconds"`
+		Name       string `json:"name"`
+		TTLSeconds int    `json:"ttl_seconds"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, maxTokenBodyBytes)).Decode(&body)
 	name := strings.TrimSpace(body.Name)
@@ -735,12 +1144,12 @@ func (s *Server) handleGuestSessionCreate(w http.ResponseWriter, r *http.Request
 	pin := randomDigits(6)
 	now := time.Now().UTC()
 	session := guestSession{
-		ID: id,
-		Name: name,
-		PIN: pin,
+		ID:             id,
+		Name:           name,
+		PIN:            pin,
 		SessionVersion: 1,
-		CreatedAt: now.Unix(),
-		ExpiresAt: now.Add(ttl).Unix(),
+		CreatedAt:      now.Unix(),
+		ExpiresAt:      now.Add(ttl).Unix(),
 	}
 	if err := s.guestStore.Create(session); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"store guest session failed: %s"}`, trimErr(err)), http.StatusInternalServerError)
@@ -753,13 +1162,13 @@ func (s *Server) handleGuestSessionCreate(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"id": session.ID,
-		"name": session.Name,
-		"pin": session.PIN,
-		"expires_at": session.ExpiresAt,
+		"id":           session.ID,
+		"name":         session.Name,
+		"pin":          session.PIN,
+		"expires_at":   session.ExpiresAt,
 		"access_token": token,
-		"token_type": "Bearer",
-		"magic_link": fmt.Sprintf("/guest?pin=%s", session.PIN),
+		"token_type":   "Bearer",
+		"magic_link":   fmt.Sprintf("/guest?pin=%s", session.PIN),
 	})
 }
 
@@ -847,8 +1256,8 @@ func (s *Server) handleGuestExchangePIN(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": token,
-		"token_type": "Bearer",
-		"expires_at": session.ExpiresAt,
+		"token_type":   "Bearer",
+		"expires_at":   session.ExpiresAt,
 	})
 }
 
@@ -882,11 +1291,24 @@ func (s *Server) handleRuntimeConfigGet(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	cfg, updatedAt := s.getRuntimeConfig()
+	cfg, updatedAt, inputs := s.getRuntimeConfigSnapshot()
+	captureCount := 0
+	otherCount := 0
+	for _, in := range inputs {
+		if in.Class == "capture" {
+			captureCount++
+		} else {
+			otherCount++
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"config":     cfg,
-		"updated_at": updatedAt,
+		"config":              cfg,
+		"updated_at":          updatedAt,
+		"inputs":              inputs,
+		"capture_inputs":      captureCount,
+		"other_inputs":        otherCount,
+		"runtime_auto_inputs": true,
 	})
 }
 
@@ -895,21 +1317,42 @@ func (s *Server) handleRuntimeConfigPut(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	var body runtimeConfig
+	var body struct {
+		PGMCount   *int              `json:"pgm_count"`
+		AUXCount   *int              `json:"aux_count"`
+		AUXSources map[string]string `json:"aux_sources"`
+	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxTokenBodyBytes)).Decode(&body); err != nil {
 		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
 		return
 	}
-	if err := validateRuntimeConfig(body); err != nil {
+	current, _ := s.getRuntimeConfig()
+	next := runtimeConfig{
+		Inputs:     current.Inputs, // auto-discovered, cannot be set manually
+		PGMCount:   current.PGMCount,
+		AUXCount:   current.AUXCount,
+		AUXSources: body.AUXSources,
+	}
+	if body.PGMCount != nil {
+		next.PGMCount = *body.PGMCount
+	}
+	if body.AUXCount != nil {
+		next.AUXCount = *body.AUXCount
+	}
+	if next.AUXSources == nil {
+		next.AUXSources = current.AUXSources
+	}
+	if err := validateRuntimeConfig(next); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, trimErr(err)), http.StatusBadRequest)
 		return
 	}
-	s.setRuntimeConfig(body)
+	s.setRuntimeConfig(next)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"saved": true,
-		"config": body,
-		"updated_at": s.runtimeUpdatedAt,
+		"saved":               true,
+		"config":              next,
+		"updated_at":          s.runtimeUpdatedAt,
+		"runtime_auto_inputs": true,
 	})
 }
 
@@ -918,14 +1361,14 @@ func (s *Server) handleRuntimeConfigApply(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	cfg, updatedAt := s.getRuntimeConfig()
+	cfg, updatedAt, _ := s.getRuntimeConfigSnapshot()
 	cfgBody, _ := json.Marshal(cfg)
 	result := map[string]any{
-		"config":      cfg,
-		"updated_at":  updatedAt,
-		"route":       map[string]any{"ok": false},
-		"engine":      map[string]any{"ok": false},
-		"applied_at":  time.Now().UTC().Unix(),
+		"config":     cfg,
+		"updated_at": updatedAt,
+		"route":      map[string]any{"ok": false},
+		"engine":     map[string]any{"ok": false},
+		"applied_at": time.Now().UTC().Unix(),
 	}
 
 	var prevRoute json.RawMessage
@@ -946,10 +1389,10 @@ func (s *Server) handleRuntimeConfigApply(w http.ResponseWriter, r *http.Request
 		applyBody, applyStatus, applyErr := s.routeControlPOST("/api/v1/route/runtime/config/apply", cfgBody)
 		routeApplied = applyErr == nil && applyStatus < 400
 		result["route"] = map[string]any{
-			"ok":         routeApplied,
+			"ok":           routeApplied,
 			"apply_status": applyStatus,
-			"apply_raw":  string(applyBody),
-			"error":      firstErr(applyErr),
+			"apply_raw":    string(applyBody),
+			"error":        firstErr(applyErr),
 		}
 	}
 
@@ -995,26 +1438,17 @@ func (s *Server) handleRuntimeConfigApply(w http.ResponseWriter, r *http.Request
 }
 
 func validateRuntimeConfig(cfg runtimeConfig) error {
-	if cfg.Inputs < 1 || cfg.Inputs > 8 {
-		return fmt.Errorf("inputs must be between 1 and 8")
+	if cfg.Inputs < 1 {
+		cfg.Inputs = 1
+	}
+	if cfg.Inputs > 8 {
+		cfg.Inputs = 8
 	}
 	if cfg.PGMCount < 1 || cfg.PGMCount > 1 {
 		return fmt.Errorf("pgm_count currently supports only 1")
 	}
 	if cfg.AUXCount < 0 || cfg.AUXCount > 4 {
 		return fmt.Errorf("aux_count must be between 0 and 4")
-	}
-	if len(cfg.InputSources) > 8 {
-		return fmt.Errorf("input_sources cannot exceed 8 entries")
-	}
-	for i, src := range cfg.InputSources {
-		source := strings.TrimSpace(src)
-		if source == "" {
-			return fmt.Errorf("input_sources[%d] is empty", i)
-		}
-		if !strings.HasPrefix(source, "srt://") {
-			return fmt.Errorf("input_sources[%d] must be srt:// URI", i)
-		}
 	}
 	for k, v := range cfg.AUXSources {
 		if k != "1" && k != "2" && k != "3" && k != "4" {
@@ -1056,6 +1490,117 @@ func (s *Server) getRuntimeConfig() (runtimeConfig, int64) {
 	s.runtimeMu.RLock()
 	defer s.runtimeMu.RUnlock()
 	return s.runtimeCfg, s.runtimeUpdatedAt
+}
+
+func (s *Server) getRuntimeConfigSnapshot() (runtimeConfig, int64, []runtimeInput) {
+	base, updatedAt := s.getRuntimeConfig()
+	inputs := s.discoverRuntimeInputs()
+	inputCount := len(inputs)
+	if inputCount < 1 {
+		inputCount = 1
+	}
+	if inputCount > 8 {
+		inputCount = 8
+	}
+	base.Inputs = inputCount
+	if base.PGMCount == 0 {
+		base.PGMCount = 1
+	}
+	return base, updatedAt, inputs
+}
+
+func (s *Server) discoverRuntimeInputs() []runtimeInput {
+	inputs := s.discoverRuntimeInputsFromRoute()
+	if len(inputs) == 0 {
+		inputs = s.discoverRuntimeInputsFromTelemetry()
+	}
+	seen := map[string]struct{}{}
+	out := make([]runtimeInput, 0, len(inputs))
+	for _, in := range inputs {
+		in.ID = strings.TrimSpace(in.ID)
+		if in.ID == "" {
+			continue
+		}
+		if _, ok := seen[in.ID]; ok {
+			continue
+		}
+		seen[in.ID] = struct{}{}
+		if in.Class != "capture" {
+			in.Class = "other"
+		}
+		in.Online = true
+		out = append(out, in)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Class != out[j].Class {
+			return out[i].Class < out[j].Class
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func (s *Server) discoverRuntimeInputsFromRoute() []runtimeInput {
+	if strings.TrimSpace(s.cfg.RouteControlBaseURL) == "" {
+		return nil
+	}
+	path := strings.TrimSpace(s.cfg.RouteInputDiscoveryPath)
+	if path == "" {
+		path = "/api/v1/route/inputs"
+	}
+	raw, status, err := s.routeControlGET(path)
+	if err != nil || status >= 400 {
+		return nil
+	}
+	var body struct {
+		Inputs []runtimeInput `json:"inputs"`
+	}
+	if err := json.Unmarshal(raw, &body); err == nil && len(body.Inputs) > 0 {
+		return body.Inputs
+	}
+	var generic struct {
+		Inputs []map[string]any `json:"inputs"`
+	}
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil
+	}
+	out := make([]runtimeInput, 0, len(generic.Inputs))
+	for _, item := range generic.Inputs {
+		out = append(out, runtimeInput{
+			ID:     strings.TrimSpace(fmt.Sprintf("%v", item["id"])),
+			Class:  strings.TrimSpace(strings.ToLower(fmt.Sprintf("%v", item["class"]))),
+			Label:  strings.TrimSpace(fmt.Sprintf("%v", item["label"])),
+			Origin: strings.TrimSpace(fmt.Sprintf("%v", item["origin"])),
+			Online: true,
+		})
+	}
+	return out
+}
+
+func (s *Server) discoverRuntimeInputsFromTelemetry() []runtimeInput {
+	if s.hub == nil {
+		return nil
+	}
+	pres := s.hub.PresenceSnapshot()
+	out := make([]runtimeInput, 0, len(pres))
+	for _, p := range pres {
+		if !p.Online {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(p.NodeType)) {
+		case "capture":
+			out = append(out, runtimeInput{
+				ID:     "capture:" + strings.TrimSpace(p.NodeID),
+				Class:  "capture",
+				Label:  strings.TrimSpace(p.NodeID),
+				Origin: "capture",
+				Online: true,
+			})
+		case "route", "engine":
+			// Reserved for future "other input" discovery hooks from node metrics.
+		}
+	}
+	return out
 }
 
 func firstErr(errs ...error) string {

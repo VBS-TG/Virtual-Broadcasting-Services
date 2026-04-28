@@ -1,12 +1,14 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 
-import { LayoutDashboard, MonitorPlay, Activity, ShieldAlert } from 'lucide-react'
+import { LayoutDashboard, MonitorPlay, Activity, FileText, Network, KeyRound } from 'lucide-react'
 
 const NAV_ITEMS = [
   { path: '/dashboard',   label: '總覽', icon: LayoutDashboard },
   { path: '/switcher',    label: '導播', icon: MonitorPlay },
+  { path: '/pipeline',    label: '鏈路', icon: Network },
+  { path: '/rental-sessions', label: '租賃', icon: KeyRound },
   { path: '/telemetry',   label: '遙測', icon: Activity },
-  { path: '/system',      label: '健康', icon: ShieldAlert },
+  { path: '/logs',        label: '日誌', icon: FileText },
 ]
 
 export default function BottomNav() {

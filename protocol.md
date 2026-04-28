@@ -86,6 +86,9 @@
 
 - `GET /api/v1/route/runtime/config`：回傳 Route 當前 runtime 配置（目前含 `inputs`、`pgm_count`、`aux_count`）。
 - `POST /api/v1/route/runtime/config/apply`：套用 runtime 配置（`inputs:1..8`、`pgm_count:1`、`aux_count:0..4`）。
+- `GET /api/v1/route/inputs`：回傳自動偵測輸入清單（`inputs[]`），來源包含：
+  - `route_dynamic_routes`：由目前 route mapping 推導
+  - `external_registry`：由 `VBS_ROUTE_EXTERNAL_INPUTS`（CSV）補充外部流來源
 
 ---
 
@@ -140,7 +143,7 @@ Engine 節點採 **Eyevinn Open Live 官方核心 + 本專案 Adapter**。
 - `POST /api/v1/switch/aux`：切 AUX 路由（body：`{"channel":"1..4","source":"input1..input8|srt://..."}`）。
 - `GET /api/v1/switch/state`：查目前 Program/Preview/AUX 狀態。
 - `GET /api/v1/runtime/config`：查 Engine 當前 Runtime 配置（inputs/pgm_count/aux_count）。
-- `POST /api/v1/runtime/config/apply`：套用 Runtime 配置（body 範例：`{"inputs":8,"pgm_count":1,"aux_count":4,"input_sources":["srt://..."],"aux_sources":{"1":"input1"}}`），由 adapter 轉譯到 Open Live（或 Strom 備援）官方配置格式。
+- `POST /api/v1/runtime/config/apply`：套用 Runtime 配置（body 範例：`{"inputs":8,"pgm_count":1,"aux_count":4,"aux_sources":{"1":"input1"}}`）；`inputs` 由上游自動偵測路數主導，不再接受手動 `input_sources`，由 adapter 轉譯到 Open Live（或 Strom 備援）官方配置格式。
 - `POST /api/v1/show-config/apply`：套用 Show Config（body 與 `packages/shared/schemas/show-config.v1.schema.json`／`pkg/showconfig` 一致）；驗證後由 adapter 記錄並回傳 `applied`（後續可擴充：來源顯示名同步至 Open Live sources 等）。
 
 ### 部署
@@ -177,11 +180,13 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 | `VBS_RUNTIME_DB_PATH` | 否 | Runtime 快照 SQLite 路徑，預設 `data/console-runtime.db`。 |
 | `VBS_SHOW_CONFIG_DB_PATH` | 否 | Show Config（製作規格）SQLite 路徑，預設 `data/console-show-config.db`。 |
 | `VBS_ROUTE_CONTROL_BASE_URL` | 否 | Route 控制面基底 URL（Console orchestrator 轉發）；未設定時 Runtime／Show Config 之下發該跳為 skip。 |
+| `VBS_ROUTE_INPUT_DISCOVERY_PATH` | 否 | Console 向 Route 查詢 inputs discovery 的路徑，預設 `/api/v1/route/inputs`。 |
 | `VBS_ENGINE_CONTROL_BASE_URL` | 否 | Engine adapter 控制面基底 URL；未設定時對應之下發為 skip。 |
 | `VBS_ROUTE_ACCESS_CLIENT_ID` / `VBS_ROUTE_ACCESS_CLIENT_SECRET` | 否 | Console → Route M2M（Cf-Access-Client-*）；未設定則請求無 Service Token（依部署而定）。 |
 | `VBS_ENGINE_ACCESS_CLIENT_ID` / `VBS_ENGINE_ACCESS_CLIENT_SECRET` | 否 | Console → Engine M2M；同上。 |
 | `VBS_CAPTURE_CONTROL_BASE_URL` | 否 | Capture 控制面基底 URL（Show Config apply／rollback 轉發）；未設定則該跳 skip。 |
 | `VBS_CAPTURE_ACCESS_CLIENT_ID` / `VBS_CAPTURE_ACCESS_CLIENT_SECRET` | 否 | Console → Capture M2M；若留空則套用時退回使用 **Engine** 之 Client Id/Secret（便於同區 Cloudflare Service Token）。 |
+| `VBS_ROUTE_EXTERNAL_INPUTS` | 否 | Route 外部輸入 registry（CSV），供 `/api/v1/route/inputs` 補充非 route mapping 的來源。 |
 
 > 配置邊界：`.env` 僅承載固定基礎參數（安全、定位、資源上限）；當天活動配置（IN 路數、PGM/AUX 路數、來源綁定）應由 Console Runtime API 下發與熱更新；**製作規格（Show Config：畫質政策、來源名、Switcher／Multiview 編排）**由 Show Config API 持久化與套用，**同樣不得**依賴改 `.env` 手動覆寫。
 
@@ -197,6 +202,11 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 | Console-HTTP / 4000 | HTTP | `GET /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin/guest） | 讀取今日 Runtime 配置 |
 | Console-HTTP / 4000 | HTTP | `PUT /api/v1/runtime/config` | `Authorization: Bearer <JWT>`（admin） | 儲存今日 Runtime 配置 |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/runtime/config/apply` | `Authorization: Bearer <JWT>`（admin） | 以 staged apply 下發至 Route/Engine（失敗回退） |
+| Console-HTTP / 4000 | WS/WSS | `GET /vbs/control/ws`（Upgrade） | `Authorization: Bearer <JWT>`（admin/guest） | 控制指令通道（action + payload schema 驗證） |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/engine/reset` | `Authorization: Bearer <JWT>`（admin/guest） | 代理 Engine 重置控制 |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/engine/pgm/output` | `Authorization: Bearer <JWT>`（admin/guest） | 代理 Engine PGM 輸出控制 |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/capture/bitrate` | `Authorization: Bearer <JWT>`（admin/guest） | Capture 預留控制接口（僅契約） |
+| Console-HTTP / 4000 | HTTP | `POST /api/v1/capture/reboot` | `Authorization: Bearer <JWT>`（admin/guest） | Capture 預留控制接口（僅契約） |
 | Console-HTTP / 4000 | HTTP | `GET /api/v1/show-config` | `Authorization: Bearer <JWT>`（admin／guest） | 讀取 Show Config **draft**、**effective** 與版本時間戳 |
 | Console-HTTP / 4000 | HTTP | `PUT /api/v1/show-config/draft` | `Authorization: Bearer <JWT>`（admin） | 儲存草稿（body 為完整 Show Config JSON；須與目前 `runtime.config.inputs` 交叉驗證） |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/show-config/apply` | `Authorization: Bearer <JWT>`（admin） | 依序嘗試 **Capture／Route／Engine** `POST /api/v1/show-config/apply`（若該基底 URL 未設定則 skip）；**全部成功或 skip** 後才將 draft 設為 Console **effective** 並寫入 history |

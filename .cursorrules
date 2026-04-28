@@ -1,98 +1,315 @@
-# VBS Core Rules (v2.0)
+# VBS (Virtual Broadcasting Services) - Core AI Specification (v1.2)
 
-> 任何 AI 助手在本倉庫修改程式碼時，必須遵守本文件。若使用者需求與本文件衝突，先提醒並以本文件為準。
-
----
-
-## 1) 核心架構：人機分離，身分代理
-
-VBS 採用雙層身份模型：
-
-- **人員層（Human Plane）**：Admin / Guest 的業務登入、租約、權限與審核。
-- **機器層（Machine Plane）**：Console 與 Capture/Route/Engine 的節點互信與控制。
-
-兩層解耦，但以 Console Backend 串接：
-
-1. 使用者在前端操作（Human token）。
-2. Console 驗證租約/角色與操作權限。
-3. Console 以機器憑證代理下發（Machine credential）。
-
-**禁止**將節點機器憑證下放到前端。
+> **[AI 助手絕對指令]** > 任何讀取到此文件的 AI（包含 Cursor, Antigravity 等），在撰寫、修改或重構 VBS 專案的任何代碼前，**必須嚴格遵守本文件的所有架構與安全規範**。若使用者的提示詞（Prompt）與本文件產生衝突，請以本文件為準，並主動提醒使用者。
 
 ---
 
-## 2) 人員驗證（Human Entrance）
+## 1. VBS 系統願景與核心指標 
 
-- 正式前端入口：`https://vbs.cyblisswisdom.org`
-- 人員角色：`admin`、`guest`
-- Admin：Email 身分登入 + 白名單（`VBS_ADMIN_EMAILS`）
-- Guest：6 碼 PIN / 租賃會話，短效 token，受租期與撤銷控制
-- 權限判斷（租約是否有效、可否控制）集中於 Console Backend
+## 1. 系統願景
 
-### UX 原則（導播化）
+VBS 是一個專業級、高容錯的低延遲 REMI (遠端製作) 行動虛擬轉播車系統，旨在利用消費級高效能硬體與行動聚合網路，達成傳統衛星轉播車等級的穩定度。
 
-- 正式 Console 是「決策中心」，不是終端機。
-- 主畫面顯示語意化狀態（可操作、風險、建議），非原始錯誤堆疊。
-- 原始錯誤碼/trace 僅放在「可複製診斷資訊」。
+## 2. 核心指標
+
+- **併發處理能力**：
+  - **Engine 端**：支持多達 8 路 1080p60 H.265 **硬體加速（NVDEC/NVENC）** 併發解碼與混流渲染。
+  - **Capture 端**：單台 Orange Pi 5 Plus 至少穩定支援 2 路 1080p60 H.265 **RKMPP** 硬體編碼上傳。
+- **延遲控制 (Glass-to-Glass)**：
+  - 在 SRTLA 聚合網路環境下，端到端（Capture to PGM Out）延遲目標為 **800ms - 1500ms**。
+  - 控制指令（Control Plane）延遲需小於 **100ms**。
+- **自癒能力**：
+  - 支持 **無縫斷線重連**（0-RTT 重新握手邏輯）。
+  - 系統組件需具備 **Stateless (無狀態)** 特性，崩潰重啟後應能自動恢復運行狀態。
+
+## 3. 架構
+
+- **物理分離 (Physical Isolation)**：
+  - **Capture (Edge)**：負責信號擷取與編碼。
+  - **Route (Cloud)**：負責 SRTLA 聚合解碼與流分發。
+  - **Engine (Core)**：負責導播切換、最終渲染與 PGM 輸出。
+  - **Console (Web)**：負責導播控制與狀態監控、邏輯排程與資產管理。
+- **平面分離 (Plane Separation)**：
+  - **資料平面 (Data Plane)**：SRT / WebRTC。專注於高頻寬、低延遲、流式數據。
+  - **控制平面 (Control Plane)**：REST API / WebSocket。專注於信號交換、狀態同步、遙測數據。**嚴禁將控制指令夾帶在影音流私有幀中處理。**
+
+## 4. 開發原則 (Vibe-coding 指引)
+
+1. **非阻塞與進程監控 (Async & Watchdog)**：
+   - 所有底層串流程序（如 `ffmpeg`, `srt-live-transmit`, `srtla_rec`）必須由父進程監控，發生異常需在 3 秒內自動重啟。
+   - 網路 I/O 必須採用異步框架，避免單個 API 超時導致整個服務阻塞。
+
+2. **硬體優先與容器化隔離 (Hardware-First)**：
+   - 強制使用專屬硬體 API：Capture 端指定 `hevc_rkmpp` 以保證 RK3588 硬體編碼；Engine 端指定 `hevc_nvenc` 以保證 GPU 渲染。
+   - **容器規範**：所有硬體調用必須在 Docker Compose 中明確定義 `/dev/dri` 或 `nvidia` runtime，嚴禁 fallback 到軟體編解碼，若硬體調用失敗應立即觸發告警並停止服務。
+
+3. **弱網環境韌性 (Resilience)**：
+   - 上行鏈路強制實施 **SRTLA (Multi-link Aggregation)** 以應對行動網路抖動。
+   - MTU 優化：針對 5G/4G 行動網路環境，實體網卡與虛擬鏈路 MTU 建議統一設定為 **1400**，以減少物理層分片導致的瘋狂掉包。
+   - 必須具備「動態碼率適應 (ABR)」邏輯，根據網路 RTT 與丟包率即時調整編碼器目標碼率。
+
+4. **混合網路架構與通訊安全 (Hybrid Network & Security)**：
+   - **影像流傳輸 (Data Plane)**：捨棄 VPN 隧道，改採 **「公網直連」** 模式以獲取極致頻寬。Capture 推向 VBS-Route 公網 IP，Engine 從 VBS-Route 拉流。
+   - **傳輸加密**：所有公網 SRT/SRTLA 流量必須強制啟用 **AES-256 加密** 並設定 Passphrase。
+  - **服務對接與 SSL (Control Plane)**：地端節點（Console, Engine）必須透過 **Cloudflare Tunnel** 映射為 HTTPS/WSS 域名，以解決 Cloudflare Pages 託管前端之混合內容封鎖。
+  - **身分驗證**：因捨棄虛擬內網隔離，所有 REST API 與 WebSocket 連線必須在應用層實作 JWT / Service Token 驗證，嚴禁無授權存取。
+
+5. **結構化日誌與觀測性 (Observability)**：
+   - 所有模組需導出結構化日誌（JSON），並即時推送到 Console。
+   - **核心監控指標**：必須包含 CPU/GPU 溫度、實體頻寬佔用、SRT 丟包率、即時解碼幀率 (Decoder FPS) 與 PGM 輸出幀率。
 
 ---
 
-## 3) 機器驗證（Machine Network）
+# 2. VBS 系統節點拓撲與物理分工規範
 
-- Console -> Route/Engine/Capture 一律採 M2M 驗證：
-  - `Cf-Access-Client-Id`
-  - `Cf-Access-Client-Secret`
-- 節點控制面允許：
-  - 主路徑：Service Token（自動化）
-  - 後備：`Cf-Access-Jwt-Assertion`（人員/維運場景）
-- 節點 API 預設不對外開放匿名存取。
+本系統嚴格執行「資料平面 (Data Plane)」與「控制平面 (Control Plane)」物理分離原則。AI 在產出代碼、Dockerfile 或部署腳本時，必須嚴格遵循各節點的硬體架構限制與開發指令規範。
+
+## 1. VBS-Capture (現場發射端)
+
+- **硬體架構**：Orange Pi 5 Plus (**編譯目標: Linux/ARM64**), Rockchip RK3588 SoC。
+- **核心職責**：
+  - 透過 HDMI 擷取卡（V4L2）獲取實體信號。
+  - 執行 H.265 (HEVC) 硬體編碼封裝。
+  - 利用雙網卡（如 USB 5G 網卡 + 內建 LAN）進行 **SRTLA (Multi-link Aggregation)** 聚合傳輸。
+- **開發規範**：
+  - **編碼器 (Encoder)**：強制調用 `hevc_rkmpp`硬體編碼。Dockerfile 需包含 Rockchip 特化版 FFmpeg 構建邏輯，嚴禁使用標準版 `libx265`軟編碼。
+  - **網路 (Networking)**：底層使用 `belabox-srtla` sender。容器必須開啟 `network_mode: host` 以利直接存取多個網路介面進行 Bond 聚合。
+  - **設備映射**：必須映射 `/dev/video`*, `/dev/mpp_service`, `/dev/rga`, `/dev/dma_heap` 以確保硬體加速鏈路完整。
+
+## 2. VBS-Route (雲端路由中繼)
+
+- **硬體架構**：AWS EC2 (**編譯目標: Linux/AMD64**), 區域: ap-northeast-1 (Taipei) 主機名: `VBS-Route`。
+- **核心職責**：
+  - **SRTLA 終端**：執行破碎封包重組、序列校對與流量解碼（若需重分發）。
+  - **消抖緩衝 (Jitter Buffer)**：將不穩定的 SRTLA 轉換為標準穩定的 SRT 流供 Engine 提取。
+  - **PGM/AUX 路由控制**：提供 `pgm` 與 `aux1~aux4` 的動態路由目標設定與查詢能力。
+- **開發規範**：
+  - **核心優化**：部署腳本必須包含 `sysctl` 優化，提升 `net.core.rmem_max` 與 `net.core.wmem_max` 至 16MB 以上，應對高位元率抖動。
+  - **時間同步**：強制配置 Chrony/NTP，確保與 Engine 的時間戳偏差 < 10ms。
+  - **安全性**  ：影像傳輸（SRT/SRTLA）採公網直連並啟用 AES-256 加密；其餘 API 管理與遙測流量經由 Cloudflare Tunnel 實施 HTTPS/WSS 加密傳輸，並於應用層導入 App JWT / Service Token 驗證機制以確保公網環境下的存取安全。
+
+## 3. VBS-Engine (渲染引擎中心)
+
+- **硬體架構**：地端高性能主機 (**編譯目標: Linux/AMD64**), Ubuntu 24.04, 搭載 NVIDIA GPU顯卡, 主機名: `VBS-Engine`。
+- **核心職責**：
+  - **併發解碼**：執行 8 路 H.265 **NVDEC** 並發硬體解碼。
+  - **導播合成**：基於 Eyevinn Open Live 官方核心（透過本專案 Adapter）執行畫面切換與 PGM 控制。
+  - **監看輸出**：透過 **WebRTC (WHEP)** 將 Multiview 推送至前端。信令交換必須經由 **Cloudflare Tunnel** 映射之 HTTPS 域名完成（以符合瀏覽器安全規範），媒體數據則嘗試以 **P2P (UDP)** 模式與瀏覽器直連，確保低延遲監看且不佔用隧道頻寬。
+  - **PGM 輸出**：將 PGM 透過 **SRT (Caller 模式)** 推送至現場設備 (OBS/VLC 等) 。由於走公網直連，傳輸時必須強制啟用 **AES-256 加密** 並配置密鑰 (Passphrase)。
+- **開發規範**：
+  - **顯存管理**：必須實作顯存預配 (Static VRAM Allocation) 邏輯。針對 8 路併發，需監控並限制各路解碼 Buffer，避免觸發 NVIDIA OOM Killer。
+  - **Pipeline 規範**：強制使用 `nvh265dec` -> `glupload` -> `gles2` 渲染鏈路，減少 CPU-GPU 之間的頻繁記憶體拷貝。
+  - **容器化**：必須指定 `runtime: nvidia` 並掛載 `NVIDIA_DRIVER_CAPABILITIES=all`。
+
+# 2.4 VBS-Console (控制端)
+
+- **硬體架構**：地端管理主機 (**編譯目標: Linux/AMD64**), 主機名: `VBS-Console`。
+- **核心職責**：
+  - **遙測匯聚監控 UI**：React 狀態監看頁面，接收各節點 JSON Log並轉換為圖表或文字（Capture/Route/Engine）的實體指標：
+    - Capture端 :
+      - 硬體健康度：CPU 溫度、設備連線狀態。
+      - 影像編碼狀態：即時編碼幀率、當前運行解析度、當前瞬時編碼碼率。
+      - 多鏈路傳輸品質：雙實體網卡之個別瞬時上傳頻寬、SRTLA 協議累計掉包總數。
+    - Route端 :
+      - 雲端系統負載：AWS EC2 實例的 CPU 使用率與記憶體 (RAM) 佔用率。
+      - 串流接收品質：SRTLA 匯聚後的總接收頻寬 (Mbps) 以及封包排序錯誤率 (Packet Reordering Error Rate)。
+      - 連線追蹤狀態：VBS-Engine 渲染端的連線狀態，確認影像流是否成功被下游提取。
+    - Engine端 :
+      - GPU 硬體效能：顯示卡溫度、運算負載以及顯存佔用量
+      - 多路解碼狀態：：8 路輸入源的個別解碼幀率與即時音軌動態電平表 
+      - 輸出監控數據：最終 PGM 畫面的輸出幀率、推流連線狀態以及推流持續時間。
+  - **信令中心 (Signaling)**：處理 WHEP 握手與全域狀態指令發送。
+    - Capture端 :
+      - 動態碼率調整：即時修改編碼器的目標碼率參數，無需中斷推流。
+      - 系統維護操作：執行遠端硬體重啟。
+    - Route端 :
+      - SRT 緩衝延遲調整：動態修改雲端中繼站接收與轉發時的緩衝值（毫秒），用於在極端網路環境下平衡影像平滑度與低延遲需求。。
+    - Engine端 :
+      - 導播環境重置：遠端強制重啟 Eyevinn Open Live adapter 程序，用於快速恢復渲染異常或 API 無回應之狀態。
+      - 最終推流控管：控制 PGM 畫面的啟動或停止推流，並支援在指令中動態配置目的地 SRT URL 位址。
+  - **虛擬導播按鈕 (Virtual Switcher)**：實作 PGM/PVW 切換、Cut/Fade 轉場控制。
+  - **Multiviewer (MTV) 監看**：接收來自 Engine 的 WebRTC (WHEP) 多分割畫面流。
+  - **Show Config 管理**：提供 draft 編輯、apply/rollback、歷史追蹤與下游套用結果回報。
+  - **租賃管理**：提供 Guest 租賃會話建立、撤銷、PIN 兌換與有效期控制。
+- **開發規範**：
+  1. **前端 (React + Tailwind CSS)**：
+    - **低延遲 MTV 播放器**：基於 WHEP 協議，強制開啟 `low-latency` 模式（禁用 Buffer），確保導播看到的分割畫面與實際 Engine 渲染同步（延遲 < 500ms）。
+    - **導播切換邏輯**：按鈕元件需模擬實體導播機（如 ATEM），區分 **Program (紅燈)** 與 **Preview (綠燈)** 狀態。
+    - **狀態預測**：當點擊切換時，前端 UI 應先進行「樂觀更新 (Optimistic UI)」，待 WebSocket 回傳確認後再鎖定狀態，提升操作手感。
+  2. **後端 (Golang - Gin/Fiber)**：
+    - **信令中繼**：僅負責交換 SDP 與轉發控制指令。**嚴禁處理/轉發任何二進位影音數據流**。
+    - **WebSocket 控制**：
+      - 各節點(Capture/Route/Engine)的傳輸資料都封成1條JSON透過WebSocket傳送，以保證所有節點的資料總傳輸不超過255
+      - 與 VBS-Engine 保持長連接。切換指令（如 `{"action": "switch", "input": 1, "target": "PGM"}`）必須在 50ms 內送達 Engine。
+    - **NTP 偏差校驗**：需定期輪詢並回報全系統節點的時鐘偏移量，確保 Log 時序一致性。
+  3. **導播控制規範 (Switcher Logic)**：
+    - **雙重安全機制**：所有切換按鈕必須具備「防連點」機制。
+    - **巨集支援**：預留 API 接口，以便未來實作Tally功能。
+  4. **自癒與穩定性**：
+    - **監看流斷線重連**：若 WebRTC 偵測到 ICE 斷開，需在 1 秒內自動發起重新交換 SDP。
+    - **狀態同步**：當 Console 頁面重新整理時，必須主動向 Engine 拉取當前 PGM/PVW 的「真實狀態」，避免 UI 顯示與實際畫面不符。
 
 ---
 
-## 4) 控制面與資料面
+## 3. 安全架構 (Zero Trust Security)
 
-- **控制面**：REST/WebSocket（授權、配置、遙測）
-- **資料面**：SRT/WebRTC（媒體流）
-- 嚴禁在 Console/BFF 轉發媒體二進位資料。
-- 媒體傳輸必須維持 SRT AES-256（`VBS_SRT_PASSPHRASE`）。
+本系統建立於「零信任」基準上，因捨棄虛擬內網（VPN）物理隔離，所有節點間的通訊必須強制實施身分校驗與加密。
+
+### 1. 網路層與身分驗證 (Cloudflare Access / Console App JWT / Service Token)
+
+- **SSL/TLS 隔離原則**：所有外部管理流量（Web 前端 API、遙測、控制指令）**必須**透過 HTTPS/WSS（Cloudflare Access + Tunnel）傳輸。嚴禁在公網環境下使用非加密之 HTTP 或 WS 協議。
+- **身分識別 (Application-level Auth)**：
+  - **人員層 (Human Plane)**：Admin / Guest 由 Console Backend 核發與驗證 App JWT（`admin` / `guest`）。
+  - **機器層 (Machine Plane)**：Console 代理至 Route/Engine/Capture 時，優先使用 `Cf-Access-Client-Id` + `Cf-Access-Client-Secret`。
+  - **JWT 後備**：節點可接受 `Cf-Access-Jwt-Assertion` 作為維運後備，但仍需嚴格做 `iss/aud/exp/nbf` 與角色檢核。
+- **存取控制**：Console 控制面與 BFF Proxy 必須要求有效 Bearer；不具備憑證之公網連線應由 Cloudflare Access 或後端中間件攔截。
+
+### 2. 媒體層 (SRT AES-256 Encryption)
+
+- **傳輸加密**：由於影像流（SRT / SRTLA）改採公網直連傳輸，**必須**啟動 **AES-256** 原生加密，以防畫面在傳輸鏈路中被截獲。
+- **密鑰管理**：
+  - **嚴禁**在代碼中寫死（Hardcode）Passphrase。
+  - 必須透過環境變數 `VBS_SRT_PASSPHRASE` 注入。
+  - AI 在生成 `docker-compose.yml` 時，必須將此變數標記為外部引用，並確保密鑰長度符合安全標準（10-64 字元）。
+
+### 3. 物理與鏈路層 (SRTLA & Resilience)
+
+- **抗截獲特性**：依賴 `belabox-srtla` 將數據碎片化分送至多個行動網路鏈路，提升公網傳輸的安全難度。
+- **高可用性與 MTU 優化**：
+  - **MTU 規範**：針對行動網路環境，實體網卡與隧道 MTU 應統一設定為 **1400**，以避免分片（Fragmentation）導致的掉包問題。
+  - 在單一鏈路斷線時，程序必須確保能透過其餘鏈路持續回報遙測狀態至 Console。
+
+### 4. 服務定位規範 (Domain-Based Discovery)
+
+- **去 IP 化**：嚴禁在代碼或前端配置中出現靜態 IP（如 `192.168.*.*` 或實體公網 IP）。
+- **標準域名定位**：必須使用透過 Cloudflare Tunnel 配置的子域名：
+  - **Console API/WSS**：`https://api.yourdomain.com`
+  - **Engine WHEP (WebRTC)**：`https://rtc.yourdomain.com`
+- **容器化注意點**：AI 生成 Docker 配置時，應確保容器內部的服務監聽於 `0.0.0.0`，並由 `cloudflared` 容器或地端 Proxy 負責將流量安全轉發至對應端口。
 
 ---
 
-## 5) 前端與 API 邊界（重要）
+## 4. 數據與控制流向 (Data & Control Flows)
 
-### 5.1 前端呼叫規範
+在撰寫各節點通訊模組時，必須嚴格遵守以下路徑與規範：
 
-- 前端優先同源 `/api/*`（BFF 模式）。
-- 若採跨域直呼 `vbsapi`，必須確保：
-  - Cloudflare Access policy 與 CORS 完整對齊
-  - 不得讓日常 API 請求被 302 到 Access login 造成 CORS 中斷
+### 1. 媒體流 (Data Plane) - 高頻寬、極致穩定
 
-### 5.2 Cloudflare Access 行為
+- **影像傳輸鏈路 (Uplink)**：
+  - **路徑 A**：`Capture` (SRTLA Caller) -> `Route(雲端)` (SRTLA Listener / 公網 IP)。
+  - **路徑 B**：`Engine` (SRT Caller) -> `VBS-Route(雲端)` (SRT Listener / 公網 IP)。
+  - **安全要求**：此公網傳輸路徑必須開啟 **SRT AES-256 加密**，Passphrase 由環境變數 `VBS_SRT_PASSPHRASE` 管理。
+- **PGM 輸出 (Master Out)**：
+  - `Engine` (SRT Caller) -> 外部收流端 (YouTube/Twitch/OBS)。需確保 Engine 端路由器或雲端防火牆已正確配置 Port Forwarding 或開放對應 UDP 埠。
+- **MTV 監看 (WebRTC/WHEP)**：
+  - **信令路徑**：`Console Frontend (Cloudflare Pages)` -> `https://rtc.yourdomain.com` (Cloudflare Tunnel) -> `Engine` (WHEP Server)。
+  - **媒體路徑**：握手後實現 **瀏覽器與 Engine 的直接 UDP P2P 通訊**，影像數據嚴禁經過隧道轉發，以確保 <200ms 的極低監看延遲。
 
-- 人員第一次建立 Access session 可能需互動登入（可跳轉）。
-- 機器 M2M 不經互動登入。
-- 禁止把「前端 XHR 被 Access 302」當成正常操作流程。
+### 2. 控制流 (Control Plane) - 安全指令對接
+
+- **指令路徑**：`Console Frontend` -> `Console Backend（同源 API / BFF）` -> `各邊緣節點`。
+- **安全規範**：
+  - **前端層**：一般控制請求走 `/api/proxy/*`，由 Console Backend 注入 M2M Service Token；登入前特定路徑可直呼 `VITE_API_BASE_URL`。
+  - **憑證層**：人員流量使用 App JWT（Authorization: Bearer）；機器流量使用 Cloudflare Service Token。
+  - **HTTPS 限制**：正式環境所有控制指令必須透過加密 HTTPS 接口轉發。
+- **開發要求**：Console 後端僅作為指令代理與握手仲介，嚴禁緩存、解碼或處理任何媒體二進位數據。
+
+### 3. 遙測流 (Telemetry Plane) - 全域狀態匯聚
+
+- **狀態上報 (Node to Hub)**：
+  - **頻率**：固定 1Hz (每秒一次)。
+  - **路徑**：`所有節點 (Capture, Route, Engine)` -> `wss://api.yourdomain.com` (Console 後端 WSS 接口)。
+  - **標準 JSON 結構**：包含每節點所需數據。
+- **狀態廣播 (Hub to Web)**：
+  - **路徑**：`Console 後端 (Hub)` -> `Console Frontend UI`。
+  - **規範**：後端需實作單個 WebSocket Server 負責匯聚數據，並以 Pub/Sub 模式分發給已授權之用戶端進行監控渲染。
+
+### 4. 網路基礎規範 (Networking)
+
+- **服務定位 (Domain-Based)**：
+  - **外部通訊**：優先使用 **Cloudflare Tunnel 子域名**，嚴禁在前端代碼中寫死動態公網 IP。
+  - **內部通訊**：若節點在同區網，可使用內網靜態 IP，但跨越公網時必須走加密域名。
+- **路由器配置 (Port Forwarding)**：
+  - **Route 端**：必須手動開啟 UDP Port (Capture 進) 與 UDP port (Engine 出) 的權限。
+  - **地端 Engine**：建議在路由器開啟特定的 UDP 埠範圍做 1:1 NAT 映射，以提高 WebRTC P2P 的成功率。
+- **MTU 優化**：所有行動網路相關介面應強制設定 **MTU 1400**，以解決公網傳輸下的分片掉包問題。
 
 ---
 
-## 6) Show Config 與 Orchestrator
+# 5. VBS 開發與部署規範
 
-Show Config 為單一真相（Single Source of Truth），由 Console 管理：
+為確保跨節點協作的一致性、硬體加速鏈路的完整性，所有 AI 生成的代碼、Dockerfile 及設定檔必須嚴格遵循以下規範：
 
-- 包含：
-  - 整線畫質政策（解析度/fps）
-  - Source 顯示名與短標籤
-  - Switcher 按鈕映射
-  - Multiview 映射
-- 套用流程必須支援：
-  - staged apply
-  - 任一步驟失敗可 rollback
-  - 下游結果可追蹤
 
-Schema 與契約來源：
+## 2. Monorepo 結構與型別同步
 
-- `packages/shared/schemas/show-config.v1.schema.json`
-- `protocol.md`
+為了在 Vibe-coding 時能「感知」全域數據結構，採用以下結構：
+
+- **目錄劃分**：
+  - `/apps/`: 包含 `capture` (Go), `route` (C/Go), `engine` (TypeScript/Node + Eyevinn Adapter), `console` (Go/React)。
+  - `/packages/shared/`: 存放全系統通用的 **JSON Schemas** 定義，包含遙測封包與控制指令格式。
+- **開發指令**：
+  - **型別先行**：涉及跨節點通訊（如 WebSocket 內的 JSON）的結構，必須優先讀取 `/packages/shared` 的定義，嚴禁各模組自行定義欄位。
+  - **代碼生成**：AI 應優先產出符合 OpenAPI 3.0 或 TypeScript Interface 的定義，確保 Console Frontend 與 Go 後端欄位完全對齊。
+
+## 3. 容器化與硬體驅動映射 (Docker-First)
+
+在撰寫 `docker-compose.yml` 時，必須針對不同架構配置專屬硬體與網路隧道：
+
+- **VBS-Capture (RK3588 專屬)**：
+  - 必須映射 `/dev/mpp_service`、`/dev/rga` 及 `/dev/dri`。
+  - 需掛載 `privileged: true` 以利多網卡（5G/4G）聚合之網路權限。
+- **VBS-Engine (NVIDIA 專屬)**：
+  - 必須指定 `runtime: nvidia` 並映射所有 GPU 裝置。
+  - **Sidecar 模式**：需同時部署 `cloudflared` 容器以建立至 Cloudflare 的加密隧道，處理 WHEP 信令轉發。
+- **VBS-Console**：
+  - 需包含 `cloudflared` 容器，將地端 API 埠口映射至 `VBS_CONSOLE_BASE_URL` 指定之域名。
+
+## 4. 異步非阻塞與自癒機制 (Async & Watchdog)
+
+- **架構要求**：採用 Go Goroutines 或 Python Asyncio。媒體處理（SRT/SRTLA）與控制信令必須位於**不同的執行緒/協程**，確保控制流不因串流壓力而阻塞。
+- **Watchdog 實作邏輯**：
+  - **進程守護**：父進程需監控 FFmpeg/Eyevinn adapter/srtla_rec 進程。若崩潰，執行 **指數退避 (Exponential Backoff)** 重啟。
+  - **數據斷流監測**：若媒體 Pipeline 在 5 秒內未輸出有效數據（Input Bitrate 為 0），強制重啟該 Pipeline 鏈路。
+- **遙測同步**：
+  - 1Hz 遙測程序必須為 **Fire-and-forget** 模式，發送至 `VBS_CONSOLE_BASE_URL` 的 WSS 接口。
+  - 單條上報 JSON 必須精確控制欄位，長度限制在 **255 Bytes** 內以降低頻寬負荷。
+
+## 5. CI/CD 與跨架構構建 (Targeting)
+
+- **多架構編譯策略**：
+  - `VBS-Capture`: 強制使用 `docker buildx` 針對 `linux/arm64` 構建，並鏈接 Rockchip 特化版 FFmpeg/MPP 庫。
+  - `Route / Engine / Console`: 針對 `linux/amd64` 構建。
+- **機敏資料管理**：
+  - `SRT Passphrase` 與 `Cloudflare Tunnel Token` 僅透過 Docker Secrets 或雲端 Runtime Env 注入，嚴禁打入 Image Layer 以防公網洩漏。
+- **網絡環境適應**：
+  - 構建腳本需自動檢查並設定行動網路網卡之 **MTU 為 1400**，作為容器啟動的前置指令。
+
+---
+
+## 6. 協定與通訊規範管理 (Protocol & Interface Manifest)
+
+這是為確保系統整合成功率而設定的「開發首要動作」。所有開發人員與 AI 助手在實作任何通訊邏輯前，必須先查閱並同步更新此規範。
+
+### 6.1 核心管理原則
+
+- **檔案位置**：專案根目錄下之 `protocol.md`。
+- **即時登記制**：凡確定使用的 **公網埠口 (Ports)**、**隧道子域名 (Subdomains)**、**API 路由 (Endpoints)** 或 **SRT StreamID 命名規則**，必須第一時間寫入此文件。
+- **安全義務**：AI 助手在生成通訊代碼時，必須確保符合 **HTTPS/WSS 強制加密** 規範，並依路徑套用正確認證（App JWT Bearer 或 Cloudflare Service Token / Access JWT）。
+
+
+### 6.3 整合防禦機制 (Anti-Integration Hell)
+
+- **SSL/HTTPS 嚴格檢查**：因前端託管於 Cloudflare Pages，所有登記 API 必須支援 HTTPS。嚴禁在開發環境外使用 `http://` 或 `ws://`。
+- **認證標註要求**：所有登記之 REST/WS 接口必須在 `protocol.md` 標註認證方式（App JWT / Service Token / Access JWT 後備）。
+- **SRT StreamID 命名規範 (公網路由關鍵)**：
+  - **範例**：`#!::m=publish,u=vbs-user,t=cam01,s=aes256`
+  - **規則**：
+    - `m` (Mode): `publish` (發送) 或 `request` (接收)。
+    - `u` (User/NodeID): 來源節點識別碼。
+    - `t` (Topic): 流名稱（如 `pgm`, `cam01`）。
+    - `s` (Security): 加密狀態標記。
+- **MTU 一致性**：所有涉及行動網路傳輸的 SRTLA 設定，必須登記並確認 MTU 為 **1400**。
 
 ---
 

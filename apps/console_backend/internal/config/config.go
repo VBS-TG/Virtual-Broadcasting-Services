@@ -42,6 +42,7 @@ type Config struct {
 	ShowConfigDBPath     string
 
 	RouteControlBaseURL  string
+	RouteInputDiscoveryPath string
 	PGMDefaultLatencyMs  int
 	EngineControlBaseURL string
 	RouteAccessClientID     string
@@ -149,6 +150,7 @@ func Load() (*Config, error) {
 		RuntimeDBPath:      runtimeDBPath,
 		ShowConfigDBPath:   showCfgDBPath,
 		RouteControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ROUTE_CONTROL_BASE_URL")),
+		RouteInputDiscoveryPath: strings.TrimSpace(getenvDefault("VBS_ROUTE_INPUT_DISCOVERY_PATH", "/api/v1/route/inputs")),
 		PGMDefaultLatencyMs: getenvIntDefault("VBS_PGM_DEFAULT_LATENCY_MS", 200),
 		EngineControlBaseURL: strings.TrimSpace(os.Getenv("VBS_ENGINE_CONTROL_BASE_URL")),
 		RouteAccessClientID: strings.TrimSpace(os.Getenv("VBS_ROUTE_ACCESS_CLIENT_ID")),

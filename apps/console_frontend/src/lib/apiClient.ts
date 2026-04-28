@@ -93,7 +93,7 @@ export async function request<T>(
     const first = await performFetch(method, firstURL, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
     const latencyMs = Math.round(performance.now() - start)
     if (first.status === 401) {
-      const refreshed = await tryRefreshAdminToken(apiBase, settings.apiTimeoutMs)
+      const refreshed = await tryRefreshAdminToken(settings.apiTimeoutMs)
       if (refreshed) {
         const second = await performFetch(method, firstURL, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
         if (!second.ok) {
@@ -148,7 +148,7 @@ async function performFetch(
   }
 }
 
-async function tryRefreshAdminToken(apiBase: string, timeoutMs: number): Promise<boolean> {
+async function tryRefreshAdminToken(timeoutMs: number): Promise<boolean> {
   if (adminRefreshInFlight) return adminRefreshInFlight
   adminRefreshInFlight = (async () => {
     const user = useAuthStore.getState().user

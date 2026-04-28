@@ -3,29 +3,20 @@ import { useAuthStore } from '../stores/authStore'
 import logoTxtImg from '../assets/images/vbslogo-img.svg'
 import {
   LayoutDashboard,
-  Settings2,
   MonitorPlay,
   Activity,
-  ShieldAlert,
   FileText,
-  Settings,
-  Lock,
   KeyRound,
   Network,
-  Clapperboard,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
   { path: '/dashboard',   label: 'Dashboard',  icon: LayoutDashboard, desc: '總覽'   },
   { path: '/switcher',    label: 'Switcher',   icon: MonitorPlay,     desc: '導播'   },
   { path: '/pipeline',    label: 'Pipeline',   icon: Network,         desc: '鏈路'   },
-  { path: '/show-config', label: 'Show',       icon: Clapperboard,    desc: '演出'   },
-  { path: '/runtime',     label: 'Runtime',    icon: Settings2,       desc: '配置',  adminOnly: true },
-  { path: '/rental-sessions', label: 'Rentals', icon: KeyRound,       desc: '租賃',  adminOnly: true },
+  { path: '/rental-sessions', label: 'Rentals', icon: KeyRound,       desc: '租賃'   },
   { path: '/telemetry',   label: 'Telemetry',  icon: Activity,        desc: '遙測'   },
-  { path: '/system',      label: 'System',     icon: ShieldAlert,     desc: '健康'   },
   { path: '/logs',        label: 'Logs',       icon: FileText,        desc: '日誌'   },
-  { path: '/settings',    label: 'Settings',   icon: Settings,        desc: '設定',  adminOnly: true },
 ]
 
 export default function Sidebar() {
@@ -37,8 +28,6 @@ export default function Sidebar() {
     logout()
     navigate('/login')
   }
-
-  const isAdmin = user?.role === 'admin'
 
   return (
     <aside 
@@ -74,7 +63,6 @@ export default function Sidebar() {
       <div className="flex flex-col gap-3 w-full items-center overflow-y-auto pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {NAV_ITEMS.map((item) => {
           const isActive = location.pathname === item.path
-          const isReadOnly = !isAdmin && item.adminOnly
           return (
             <button
               key={item.path}
@@ -96,8 +84,6 @@ export default function Sidebar() {
               <span className={`text-[10px] font-medium leading-none ${isActive ? 'opacity-100' : 'opacity-60'}`}>
                 {item.desc}
               </span>
-
-              {isReadOnly && <Lock className="w-3 h-3 absolute top-1.5 right-1.5 opacity-40" />}
             </button>
           )
         })}
@@ -111,7 +97,7 @@ export default function Sidebar() {
         {/* 角色標籤 (從 Header 移植) */}
         {user && (
           <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg tracking-widest leading-none shadow-sm
-            ${isAdmin ? 'bg-vbs-accent/20 text-vbs-accent border border-vbs-accent/30' : 'bg-vbs-pvw/20 text-vbs-pvw border border-vbs-pvw/30'}`}>
+            ${user.role === 'admin' ? 'bg-vbs-accent/20 text-vbs-accent border border-vbs-accent/30' : 'bg-vbs-pvw/20 text-vbs-pvw border border-vbs-pvw/30'}`}>
             {user.role?.toUpperCase()}
           </span>
         )}

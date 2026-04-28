@@ -65,6 +65,132 @@ func (s *relayRouteStore) snapshot() map[string]string {
 	return out
 }
 
+type discoveredInput struct {
+	ID     string `json:"id"`
+	Class  string `json:"class"` // capture | other
+	Label  string `json:"label,omitempty"`
+	Origin string `json:"origin,omitempty"`
+	Source string `json:"source,omitempty"` // route_dynamic_routes | external_registry
+	Online bool   `json:"online"`
+}
+
+func discoverInputsFromRoutes(routes map[string]string) []discoveredInput {
+	seen := map[string]discoveredInput{}
+	for _, target := range routes {
+		t := strings.TrimSpace(target)
+		if t == "" {
+			continue
+		}
+		id, className, label := classifyInputTarget(t)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = discoveredInput{
+			ID:     id,
+			Class:  className,
+			Label:  label,
+			Origin: t,
+			Source: "route_dynamic_routes",
+			Online: true,
+		}
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]discoveredInput, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, seen[k])
+	}
+	return out
+}
+
+func discoverInputsFromExternal(rawList []string) []discoveredInput {
+	seen := map[string]discoveredInput{}
+	for _, raw := range rawList {
+		target := strings.TrimSpace(raw)
+		if target == "" {
+			continue
+		}
+		id, className, label := classifyInputTarget(target)
+		if id == "" {
+			continue
+		}
+		seen[id] = discoveredInput{
+			ID:     id,
+			Class:  className,
+			Label:  label,
+			Origin: target,
+			Source: "external_registry",
+			Online: true,
+		}
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]discoveredInput, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, seen[k])
+	}
+	return out
+}
+
+func mergeDiscoveredInputs(groups ...[]discoveredInput) []discoveredInput {
+	seen := map[string]discoveredInput{}
+	for _, items := range groups {
+		for _, item := range items {
+			item.ID = strings.TrimSpace(item.ID)
+			if item.ID == "" {
+				continue
+			}
+			if _, ok := seen[item.ID]; ok {
+				continue
+			}
+			seen[item.ID] = item
+		}
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]discoveredInput, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, seen[k])
+	}
+	return out
+}
+
+func classifyInputTarget(raw string) (id, className, label string) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", "", ""
+	}
+	l := strings.ToLower(s)
+	switch {
+	case strings.HasPrefix(l, "capture:"):
+		base := strings.TrimSpace(s[len("capture:"):])
+		if base == "" {
+			base = "unknown"
+		}
+		return "capture:" + base, "capture", base
+	case strings.HasPrefix(l, "capture-"):
+		return s, "capture", strings.TrimPrefix(s, "capture-")
+	case strings.HasPrefix(l, "input"):
+		return s, "other", s
+	case strings.HasPrefix(l, "srt://"):
+		return s, "other", "external"
+	default:
+		return s, "other", s
+	}
+}
+
 // Start 啟動 Route 控制面 HTTP 服務（健康檢查、SRT 緩衝參數熱更新）。非資料平面；須防火牆隔離，授權為 Cf-Access-Client-Id/Secret（與本節點 VBS_CF_ACCESS_* 一致）或 Cf-Access-Jwt-Assertion。
 func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restart chan<- struct{}, logger *log.Logger, auth *consoleauth.Provider, pipeline *srtla.Pipeline, collector *telemetry.IngestCollector) {
 	if logger == nil {
@@ -338,6 +464,33 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+
+	mux.HandleFunc("/api/v1/route/inputs", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizedControlPlane(r, cfg, auth) {
+			logger.Printf("[route][ctrl] 未授權的 API 請求 remote=%s path=%s", r.RemoteAddr, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		routes := routeStore.snapshot()
+		inputs := mergeDiscoveredInputs(
+			discoverInputsFromRoutes(routes),
+			discoverInputsFromExternal(cfg.ExternalInputs),
+		)
+		sources := []string{"route_dynamic_routes"}
+		if len(cfg.ExternalInputs) > 0 {
+			sources = append(sources, "external_registry")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"inputs":              inputs,
+			"runtime_auto_inputs": true,
+			"sources":             sources,
+		})
 	})
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {

@@ -65,7 +65,7 @@ func (s *Server) handleShowConfigDraftPut(w http.ResponseWriter, r *http.Request
 		return
 	}
 	showconfig.Normalize(&cfg)
-	rt, _ := s.getRuntimeConfig()
+	rt, _, _ := s.getRuntimeConfigSnapshot()
 	if err := showconfig.Validate(cfg, rt.Inputs); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, trimErr(err)), http.StatusBadRequest)
 		return
@@ -102,7 +102,7 @@ func (s *Server) handleShowConfigApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	showconfig.Normalize(&draft)
-	rt, _ := s.getRuntimeConfig()
+	rt, _, _ := s.getRuntimeConfigSnapshot()
 	if err := showconfig.Validate(draft, rt.Inputs); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, trimErr(err)), http.StatusBadRequest)
 		return
@@ -220,7 +220,7 @@ func (s *Server) handleShowConfigRollback(w http.ResponseWriter, r *http.Request
 		return
 	}
 	showconfig.Normalize(&prevCfg)
-	rt, _ := s.getRuntimeConfig()
+	rt, _, _ := s.getRuntimeConfigSnapshot()
 	if err := showconfig.Validate(prevCfg, rt.Inputs); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"上一版與目前 runtime 路數不相容: %s"}`, trimErr(err)), http.StatusConflict)
 		return
