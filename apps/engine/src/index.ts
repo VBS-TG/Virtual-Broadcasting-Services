@@ -8,7 +8,7 @@ import { normalizeShowConfig, validateShowConfig, type ShowConfig } from "./show
 interface RuntimeState {
   program: string;
   preview: string;
-  aux: Record<"1" | "2" | "3" | "4", string>;
+  aux: Record<string, string>;
 }
 
 interface RuntimeConfig {
@@ -67,12 +67,7 @@ const remoteJWKSet = createRemoteJWKSet(new URL(resolvedJWKSURL), {
 const state: RuntimeState = {
   program: "",
   preview: "",
-  aux: {
-    "1": "",
-    "2": "",
-    "3": "",
-    "4": "",
-  },
+  aux: defaultAuxState(20),
 };
 let runtimeConfig: RuntimeConfig = {
   inputs: 8,
@@ -81,6 +76,16 @@ let runtimeConfig: RuntimeConfig = {
 };
 let activeProductionID = "";
 let pgmOutputState: { enabled: boolean; url: string } = { enabled: false, url: "" };
+
+function auxChannelKeys(count = 20): string[] {
+  return Array.from({ length: count }, (_, i) => String(i + 1));
+}
+
+function defaultAuxState(count = 20): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const ch of auxChannelKeys(count)) out[ch] = "";
+  return out;
+}
 
 function env(name: string, defaultValue: string): string {
   return (process.env[name] ?? defaultValue).trim();
@@ -307,15 +312,16 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
   if (!Number.isInteger(next.inputs) || next.inputs < 1 || next.inputs > 8) {
     throw new Error("inputs must be integer between 1 and 8");
   }
-  if (!Number.isInteger(next.pgm_count) || next.pgm_count !== 1) {
-    throw new Error("pgm_count currently supports only 1");
+  if (!Number.isInteger(next.pgm_count) || next.pgm_count < 1 || next.pgm_count > 5) {
+    throw new Error("pgm_count must be integer between 1 and 5");
   }
-  if (!Number.isInteger(next.aux_count) || next.aux_count < 0 || next.aux_count > 4) {
-    throw new Error("aux_count must be integer between 0 and 4");
+  if (!Number.isInteger(next.aux_count) || next.aux_count < 0 || next.aux_count > 20) {
+    throw new Error("aux_count must be integer between 0 and 20");
   }
   if (next.aux_sources) {
     for (const [ch, srcRaw] of Object.entries(next.aux_sources)) {
-      if (!["1", "2", "3", "4"].includes(ch)) throw new Error("aux_sources keys must be 1..4");
+      const n = Number(ch);
+      if (!Number.isFinite(n) || n < 1 || n > 20) throw new Error("aux_sources keys must be 1..20");
       const src = String(srcRaw ?? "").trim();
       if (!src) throw new Error(`aux_sources[${ch}] is empty`);
       if (!ensureSourceAllowed(src, next)) throw new Error(`aux_sources[${ch}] source out of range`);
@@ -327,7 +333,7 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
   // Apply selected buses to Open Live production mapping.
   await assignProductionInput(productionID, openLiveProgramInput, sourceIDFromSelection(state.program || "input1"));
   await assignProductionInput(productionID, openLivePreviewInput, sourceIDFromSelection(state.preview || "input2"));
-  for (const ch of ["1", "2", "3", "4"] as const) {
+  for (const ch of auxChannelKeys(20)) {
     if (Number(ch) > next.aux_count) continue;
     const selected = String(next.aux_sources?.[ch] ?? state.aux[ch] ?? `input${ch}`);
     await assignProductionInput(productionID, mixerInputForAux(ch), sourceIDFromSelection(selected));
@@ -352,10 +358,8 @@ async function applyRuntimeConfig(next: RuntimeConfig): Promise<RuntimeConfig> {
     state.program = String(remoteState.program ?? "");
     state.preview = String(remoteState.preview ?? "");
     state.aux = {
-      "1": String(remoteState.aux?.["1"] ?? ""),
-      "2": String(remoteState.aux?.["2"] ?? ""),
-      "3": String(remoteState.aux?.["3"] ?? ""),
-      "4": String(remoteState.aux?.["4"] ?? ""),
+      ...defaultAuxState(20),
+      ...Object.fromEntries(auxChannelKeys(20).map((ch) => [ch, String(remoteState.aux?.[ch] ?? "")])),
     };
   } catch {
     // Open Live state endpoint may not exist on all deployments.
@@ -466,10 +470,8 @@ const server = createServer(async (req, res) => {
         state.program = String(remoteState.program ?? "");
         state.preview = String(remoteState.preview ?? "");
         state.aux = {
-          "1": String(remoteState.aux?.["1"] ?? ""),
-          "2": String(remoteState.aux?.["2"] ?? ""),
-          "3": String(remoteState.aux?.["3"] ?? ""),
-          "4": String(remoteState.aux?.["4"] ?? ""),
+          ...defaultAuxState(20),
+          ...Object.fromEntries(auxChannelKeys(20).map((ch) => [ch, String(remoteState.aux?.[ch] ?? "")])),
         };
       } catch {
         // fallback to last known state
@@ -562,11 +564,11 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const channel = String(body.channel ?? "");
       const source = String(body.source ?? "").trim();
-      if (!["1", "2", "3", "4"].includes(channel)) return writeJson(res, 400, { error: "channel must be 1..4" });
+      if (!auxChannelKeys(20).includes(channel)) return writeJson(res, 400, { error: "channel must be 1..20" });
       if (!source) return writeJson(res, 400, { error: "source required" });
       const productionID = await ensureProduction();
       await assignProductionInput(productionID, mixerInputForAux(channel), sourceIDFromSelection(source));
-      state.aux[channel as "1" | "2" | "3" | "4"] = source;
+      state.aux[channel] = source;
       writeJson(res, 200, { applied: true, channel, source });
       return;
     }

@@ -37,16 +37,30 @@ type relayRouteStore struct {
 	routes map[string]string
 }
 
+const maxPGMCount = 5
+const maxAUXCount = 20
+
 func newRelayRouteStore() *relayRouteStore {
-	return &relayRouteStore{
-		routes: map[string]string{
-			"pgm":  "",
-			"aux1": "",
-			"aux2": "",
-			"aux3": "",
-			"aux4": "",
-		},
+	routes := map[string]string{}
+	routes["pgm"] = ""
+	for i := 1; i <= maxAUXCount; i++ {
+		routes[fmt.Sprintf("aux%d", i)] = ""
 	}
+	return &relayRouteStore{
+		routes: routes,
+	}
+}
+
+func isValidRouteOutput(output string) bool {
+	o := strings.ToLower(strings.TrimSpace(output))
+	if o == "pgm" {
+		return true
+	}
+	if !strings.HasPrefix(o, "aux") {
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(o, "aux"))
+	return err == nil && n >= 1 && n <= maxAUXCount
 }
 
 func (s *relayRouteStore) set(output, target string) {
@@ -357,12 +371,12 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 			http.Error(w, "inputs must be 1..8", http.StatusBadRequest)
 			return
 		}
-		if body.PGMCount != 1 {
-			http.Error(w, "pgm_count currently supports only 1", http.StatusBadRequest)
+		if body.PGMCount < 1 || body.PGMCount > maxPGMCount {
+			http.Error(w, "pgm_count must be 1..5", http.StatusBadRequest)
 			return
 		}
-		if body.AUXCount < 0 || body.AUXCount > 4 {
-			http.Error(w, "aux_count must be 0..4", http.StatusBadRequest)
+		if body.AUXCount < 0 || body.AUXCount > maxAUXCount {
+			http.Error(w, "aux_count must be 0..20", http.StatusBadRequest)
 			return
 		}
 		runtimeMu.Lock()
@@ -441,10 +455,8 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 			}
 			output := strings.ToLower(strings.TrimSpace(body.Output))
 			target := strings.TrimSpace(body.Target)
-			switch output {
-			case "pgm", "aux1", "aux2", "aux3", "aux4":
-			default:
-				http.Error(w, "output must be one of: pgm,aux1,aux2,aux3,aux4", http.StatusBadRequest)
+			if !isValidRouteOutput(output) {
+				http.Error(w, "output must be pgm or aux1..aux20", http.StatusBadRequest)
 				return
 			}
 			if target == "" {

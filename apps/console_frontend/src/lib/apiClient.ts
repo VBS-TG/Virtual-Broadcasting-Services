@@ -318,6 +318,58 @@ export async function getRuntimeConfig(): Promise<ApiResponse<RuntimeConfig>> {
   return { ...res, data: parseRuntimeConfig(res.data) }
 }
 
+export async function putRuntimeConfig(config: Pick<RuntimeConfig, 'pgm_count' | 'aux_count' | 'aux_sources'>): Promise<ApiResponse<RuntimeConfig>> {
+  const res = await request<any>('PUT', '/api/v1/runtime/config', {
+    pgm_count: config.pgm_count,
+    aux_count: config.aux_count,
+    aux_sources: config.aux_sources,
+  })
+  if (res.error) return res as ApiResponse<RuntimeConfig>
+  return { ...res, data: parseRuntimeConfig(res.data) }
+}
+
+export async function postSessionKey(): Promise<ApiResponse<{ passphrase: string; algorithm?: string; expires_in?: string }>> {
+  const res = await request<any>('POST', '/api/v1/stream/session-key')
+  if (res.error) return res as ApiResponse<{ passphrase: string; algorithm?: string; expires_in?: string }>
+  const data = res.data ?? {}
+  return {
+    ...res,
+    data: {
+      passphrase: String(data.passphrase ?? ''),
+      algorithm: data.algorithm ? String(data.algorithm) : undefined,
+      expires_in: data.expires_in ? String(data.expires_in) : undefined,
+    },
+  }
+}
+
+export async function postRouteBuffer(latencyMs: number, lossMaxTTL: number): Promise<ApiResponse<void>> {
+  const res = await request<any>('POST', '/api/v1/pgm/route-buffer', {
+    latency_ms: latencyMs,
+    loss_max_ttl: lossMaxTTL,
+  })
+  return { ...res, data: undefined }
+}
+
+export async function postEngineReset(): Promise<ApiResponse<void>> {
+  const res = await request<any>('POST', '/api/v1/engine/reset', {})
+  return { ...res, data: undefined }
+}
+
+export async function postEnginePGMOutput(enabled: boolean, url: string): Promise<ApiResponse<void>> {
+  const res = await request<any>('POST', '/api/v1/engine/pgm/output', { enabled, url })
+  return { ...res, data: undefined }
+}
+
+export async function postCaptureBitrate(bitrateKbps: number): Promise<ApiResponse<void>> {
+  const res = await request<any>('POST', '/api/v1/capture/bitrate', { bitrate_kbps: bitrateKbps })
+  return { ...res, data: undefined }
+}
+
+export async function postCaptureReboot(reason: string): Promise<ApiResponse<void>> {
+  const res = await request<any>('POST', '/api/v1/capture/reboot', { reason })
+  return { ...res, data: undefined }
+}
+
 export async function exchangeGuestPIN(pin: string): Promise<ApiResponse<GuestExchangeResult>> {
   const res = await request<any>('POST', '/api/v1/guest/exchange-pin', { pin })
   if (res.error) return res as ApiResponse<GuestExchangeResult>

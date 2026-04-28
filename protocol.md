@@ -85,7 +85,7 @@
 ### Route Runtime Config API
 
 - `GET /api/v1/route/runtime/config`：回傳 Route 當前 runtime 配置（目前含 `inputs`、`pgm_count`、`aux_count`）。
-- `POST /api/v1/route/runtime/config/apply`：套用 runtime 配置（`inputs:1..8`、`pgm_count:1`、`aux_count:0..4`）。
+- `POST /api/v1/route/runtime/config/apply`：套用 runtime 配置（`inputs:1..8`、`pgm_count:1..5`、`aux_count:0..20`）。
 - `GET /api/v1/route/inputs`：回傳自動偵測輸入清單（`inputs[]`），來源包含：
   - `route_dynamic_routes`：由目前 route mapping 推導
   - `external_registry`：由 `VBS_ROUTE_EXTERNAL_INPUTS`（CSV）補充外部流來源
@@ -140,10 +140,10 @@ Engine 節點採 **Eyevinn Open Live 官方核心 + 本專案 Adapter**。
 
 - `POST /api/v1/switch/program`：切 Program 來源（body：`{"source":"input1..input8|srt://..."}`）。
 - `POST /api/v1/switch/preview`：切 Preview 來源（body：同上）。
-- `POST /api/v1/switch/aux`：切 AUX 路由（body：`{"channel":"1..4","source":"input1..input8|srt://..."}`）。
+- `POST /api/v1/switch/aux`：切 AUX 路由（body：`{"channel":"1..20","source":"input1..input8|srt://..."}`）。
 - `GET /api/v1/switch/state`：查目前 Program/Preview/AUX 狀態。
 - `GET /api/v1/runtime/config`：查 Engine 當前 Runtime 配置（inputs/pgm_count/aux_count）。
-- `POST /api/v1/runtime/config/apply`：套用 Runtime 配置（body 範例：`{"inputs":8,"pgm_count":1,"aux_count":4,"aux_sources":{"1":"input1"}}`）；`inputs` 由上游自動偵測路數主導，不再接受手動 `input_sources`，由 adapter 轉譯到 Open Live（或 Strom 備援）官方配置格式。
+- `POST /api/v1/runtime/config/apply`：套用 Runtime 配置（body 範例：`{"inputs":8,"pgm_count":5,"aux_count":20,"aux_sources":{"1":"input1","20":"input8"}}`）；`inputs` 由上游自動偵測路數主導，不再接受手動 `input_sources`，由 adapter 轉譯到 Open Live（或 Strom 備援）官方配置格式。
 - `POST /api/v1/show-config/apply`：套用 Show Config（body 與 `packages/shared/schemas/show-config.v1.schema.json`／`pkg/showconfig` 一致）；驗證後由 adapter 記錄並回傳 `applied`（後續可擴充：來源顯示名同步至 Open Live sources 等）。
 
 ### 部署

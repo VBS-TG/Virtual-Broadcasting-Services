@@ -5,22 +5,50 @@ interface MultiviewerProps {
   pvw: number
   compact?: boolean
   fullScreen?: boolean
+  inputLabels?: string[]
+  cellSources?: string[]
+  editable?: boolean
+  onCellSourceChange?: (cellIndex: number, source: string) => void
+  buttonMappings?: string[]
+  activeCellIndex?: number | null
+  onActiveCellChange?: (cellIndex: number) => void
 }
 
-const CELLS = [
-  { id: 1, label: 'CAM-1', color: '#0a1628' },
-  { id: 2, label: 'CAM-2', color: '#0d1a2e' },
-  { id: 3, label: 'CAM-3', color: '#1a0d28' },
-  { id: 4, label: 'CAM-4', color: '#1e1408' },
-  { id: 5, label: 'HDMI-5', color: '#0a1520' },
-  { id: 6, label: 'FILE-6', color: '#0a1e14' },
-  { id: 7, label: 'GFX-7', color: '#151510' },
-  { id: 8, label: 'BLK-8', color: '#080808' },
-]
+const CELL_COLORS = ['#0a1628', '#0d1a2e', '#1a0d28', '#1e1408', '#0a1520', '#0a1e14', '#151510', '#080808']
 
-export default function Multiviewer({ pgm, pvw, compact, fullScreen }: MultiviewerProps) {
-  const pgmCell = CELLS.find(c => c.id === pgm) || CELLS[0]
-  const pvwCell = CELLS.find(c => c.id === pvw) || CELLS[1]
+function sourceToIndex(source: string): number {
+  const n = Number(String(source ?? '').replace('input', ''))
+  if (!Number.isFinite(n) || n < 1 || n > 8) return 1
+  return n
+}
+
+export default function Multiviewer({
+  pgm,
+  pvw,
+  compact,
+  fullScreen,
+  inputLabels,
+  cellSources,
+  editable,
+  onCellSourceChange,
+  buttonMappings,
+  activeCellIndex,
+  onActiveCellChange,
+}: MultiviewerProps) {
+  const labels = Array.from({ length: 8 }, (_, i) => inputLabels?.[i] || `Source${i + 1}`)
+  const mappedCells = Array.from({ length: 8 }, (_, i) => {
+    const src = cellSources?.[i] || `input${i + 1}`
+    const srcIdx = sourceToIndex(src)
+    return { id: i + 1, source: src, sourceIndex: srcIdx, label: labels[srcIdx - 1], color: CELL_COLORS[(srcIdx - 1) % CELL_COLORS.length] }
+  })
+  const pgmCell = mappedCells.find(c => c.sourceIndex === pgm) || mappedCells[0]
+  const pvwCell = mappedCells.find(c => c.sourceIndex === pvw) || mappedCells[1]
+  const [pickerCell, setPickerCell] = useState<number | null>(null)
+  const [selectedCell, setSelectedCell] = useState<number | null>(activeCellIndex ?? null)
+
+  useEffect(() => {
+    if (activeCellIndex != null) setSelectedCell(activeCellIndex)
+  }, [activeCellIndex])
 
   return (
     <div className={`flex flex-col ${fullScreen ? 'w-full h-full p-1' : `glass rounded-xl ${compact ? 'p-3' : 'p-4'} h-full w-full`}`}>
@@ -41,18 +69,65 @@ export default function Multiviewer({ pgm, pvw, compact, fullScreen }: Multiview
           <div className="col-span-2 row-span-2 relative">
             <ViewCell cell={pgmCell} isPgm={true} isLarge={true} labelOverride="PGM" />
           </div>
-          {CELLS.map((cell) => (
+          {mappedCells.map((cell, idx) => (
             <div key={cell.id} className="col-span-1 row-span-1">
-              <ViewCell cell={cell} isPgm={pgm === cell.id} isPvw={pvw === cell.id} />
+              <button
+                className={`w-full h-full ${selectedCell === idx ? 'ring-2 ring-vbs-accent rounded-md' : ''}`}
+                onClick={() => {
+                  if (!editable) return
+                  setSelectedCell(idx)
+                  onActiveCellChange?.(idx)
+                  setPickerCell(idx)
+                }}
+              >
+                <ViewCell cell={{ ...cell, id: cell.sourceIndex }} isPgm={pgm === cell.sourceIndex} isPvw={pvw === cell.sourceIndex} />
+              </button>
             </div>
           ))}
         </div>
       </div>
+      {editable && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {(buttonMappings ?? Array.from({ length: 8 }, (_, i) => `input${i + 1}`)).map((src, i) => (
+            <button
+              key={`map-btn-${i}`}
+              onClick={() => {
+                if (selectedCell == null) return
+                onCellSourceChange?.(selectedCell, src)
+              }}
+              className="px-2 py-1 rounded border border-white/10 bg-white/5 text-white text-[11px]"
+            >
+              {`${i + 1}: ${src}`}
+            </button>
+          ))}
+        </div>
+      )}
+      {pickerCell != null && editable && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setPickerCell(null)}>
+          <div className="glass rounded-xl p-4 min-w-[300px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-white font-black mb-3">{`指定 Cell ${pickerCell + 1} 來源`}</div>
+            <div className="grid grid-cols-2 gap-2">
+              {Array.from({ length: 8 }, (_, i) => `input${i + 1}`).map((src, idx) => (
+                <button
+                  key={src}
+                  onClick={() => {
+                    onCellSourceChange?.(pickerCell, src)
+                    setPickerCell(null)
+                  }}
+                  className="px-2 py-2 rounded border border-white/10 bg-white/5 text-white text-[12px]"
+                >
+                  {`${src} (${labels[idx]})`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: typeof CELLS[0]; isPgm?: boolean; isPvw?: boolean; isLarge?: boolean; labelOverride?: string }) {
+function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: { id: number; label: string; color: string }; isPgm?: boolean; isPvw?: boolean; isLarge?: boolean; labelOverride?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [fps, setFps] = useState(60)
   const [bitrate, setBitrate] = useState(Math.floor(Math.random() * 3000 + 4000))

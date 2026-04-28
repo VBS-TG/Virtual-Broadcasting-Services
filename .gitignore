@@ -23,6 +23,6 @@ apps/engine/dist
 # Local environment secrets
 .env.*
 !.env.*.example
-
 推版規則.md
-
+apps/console_frontend/.vscode
+apps/console_frontend/.vite-env.d.ts

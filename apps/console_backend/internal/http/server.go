@@ -781,8 +781,8 @@ func validateSwitchProgramPreviewPayload(payload map[string]any) *controlError {
 
 func validateSwitchAUXPayload(payload map[string]any) *controlError {
 	channel, ok := asInt(payload["channel"])
-	if !ok || channel < 1 || channel > 4 {
-		return &controlError{Status: http.StatusBadRequest, Code: "invalid_channel", Message: "channel must be 1..4"}
+	if !ok || channel < 1 || channel > 20 {
+		return &controlError{Status: http.StatusBadRequest, Code: "invalid_channel", Message: "channel must be 1..20"}
 	}
 	source := strings.TrimSpace(fmt.Sprintf("%v", payload["source"]))
 	if !validateSourceValue(source) {
@@ -1444,15 +1444,16 @@ func validateRuntimeConfig(cfg runtimeConfig) error {
 	if cfg.Inputs > 8 {
 		cfg.Inputs = 8
 	}
-	if cfg.PGMCount < 1 || cfg.PGMCount > 1 {
-		return fmt.Errorf("pgm_count currently supports only 1")
+	if cfg.PGMCount < 1 || cfg.PGMCount > 5 {
+		return fmt.Errorf("pgm_count must be between 1 and 5")
 	}
-	if cfg.AUXCount < 0 || cfg.AUXCount > 4 {
-		return fmt.Errorf("aux_count must be between 0 and 4")
+	if cfg.AUXCount < 0 || cfg.AUXCount > 20 {
+		return fmt.Errorf("aux_count must be between 0 and 20")
 	}
 	for k, v := range cfg.AUXSources {
-		if k != "1" && k != "2" && k != "3" && k != "4" {
-			return fmt.Errorf("aux_sources keys must be 1..4")
+		ch, err := strconv.Atoi(strings.TrimSpace(k))
+		if err != nil || ch < 1 || ch > 20 {
+			return fmt.Errorf("aux_sources keys must be 1..20")
 		}
 		source := strings.TrimSpace(v)
 		if source == "" {
