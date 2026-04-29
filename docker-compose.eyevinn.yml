@@ -14,9 +14,11 @@ services:
     container_name: vbs-couchdb
     restart: always
     network_mode: host
+    env_file:
+      - ./env/.env.engine
     environment:
-      - COUCHDB_USER=${VBS_DB_USER}
-      - COUCHDB_PASSWORD=${VBS_DB_PASSWORD}
+      - COUCHDB_USER=${VBS_DB_USER:-admin}
+      - COUCHDB_PASSWORD=${VBS_DB_PASSWORD:-admin1234}
     volumes:
       - ./data/couchdb:/opt/couchdb/data
 
@@ -26,12 +28,14 @@ services:
     container_name: vbs-open-live
     restart: always
     network_mode: host
+    env_file:
+      - ./env/.env.engine
     depends_on:
       - vbs-couchdb
       - vbs-strom
     environment:
       - PORT=18080
-      - COUCHDB_URL=http://${VBS_DB_USER}:${VBS_DB_PASSWORD}@127.0.0.1:5984
+      - COUCHDB_URL=http://${VBS_DB_USER:-admin}:${VBS_DB_PASSWORD:-admin1234}@127.0.0.1:5984
       - COUCHDB_NAME=open-live
       - STROM_URL=http://127.0.0.1:8080
       - LOG_LEVEL=info
