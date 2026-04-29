@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const isDev = mode === 'development'; // 判斷是否為開發模式
+  const isDev = mode === 'development';
 
   const RAW_TOKEN = env.VITE_DEV_AUTH_TOKEN || '';
   const VBS_TOKEN = (RAW_TOKEN.startsWith('Bearer ') ? RAW_TOKEN : `Bearer ${RAW_TOKEN}`)
@@ -13,7 +13,6 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    // 只有在開發環境才需要 server 設定
     server: isDev ? {
       proxy: {
         '/api': {
@@ -21,10 +20,11 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
           headers: {
-            'Authorization': VBS_TOKEN
+            'Authorization': VBS_TOKEN,
+            // 💡 關鍵新增：加入 Cloudflare Service Token 穿透門禁
+            'CF-Access-Client-Id': env.VITE_CF_ACCESS_CLIENT_ID || '',
+            'CF-Access-Client-Secret': env.VITE_CF_ACCESS_CLIENT_SECRET || '',
           },
-          // 如果後端路徑沒有 /api，請取消下一行註解
-          // rewrite: (path) => path.replace(/^\/api/, ''),
           configure: (proxy, _options) => {
             proxy.on('proxyReq', (proxyReq, req, _res) => {
               console.log('--- Vite Dev Proxy ---');
@@ -33,7 +33,17 @@ export default defineConfig(({ mode }) => {
             });
           },
         },
+        // 💡 如果 RTC 也要透過 Proxy，請同步加入
+        '/whep': {
+          target: 'https://vbsrtc.cyblisswisdom.org',
+          changeOrigin: true,
+          secure: true,
+          headers: {
+            'CF-Access-Client-Id': env.VITE_CF_ACCESS_CLIENT_ID || '',
+            'CF-Access-Client-Secret': env.VITE_CF_ACCESS_CLIENT_SECRET || '',
+          }
+        }
       },
-    } : {}, // 正式環境 server 區塊為空
+    } : {},
   }
 })
