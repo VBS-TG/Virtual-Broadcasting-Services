@@ -133,3 +133,27 @@ services:
       -o ${VBS_SRT_WHEP_PASSTHROUGH_8:-0.0.0.0:18888}
       -p ${VBS_SRT_WHEP_HTTP_PORT_8:-18008}
       -s ${VBS_SRT_WHEP_MODE_8:-caller}
+
+  # 5. Engine Adapter（併入同一 stack，避免雙 compose 造成 orphan/命名衝突）
+  vbs-engine:
+    build:
+      context: .
+      dockerfile: apps/engine/Dockerfile
+    restart: always
+    network_mode: host
+    env_file:
+      - ./.env.engine
+    environment:
+      - VBS_ENGINE_MIXER_WIDTH=854
+      - VBS_ENGINE_MIXER_HEIGHT=480
+      - PORT=5000
+      - VBS_ENGINE_API_PORT=5000
+      - VBS_ENGINE_TELEMETRY_ENABLED=1
+      - VBS_ENGINE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
+      - VBS_METRICS_INTERVAL_SEC=1
+      - VBS_NODE_ID=vbs-engine
+      - VBS_CF_JWKS_CACHE_TTL_SEC=3600
+      - VBS_NODE_CN_PREFIX=vbs-node-
+      - VBS_ENGINE_CONTROL_API_ENABLED=1
+      - VBS_ENGINE_CONTROL_BIND_HOST=0.0.0.0
+      - VBS_ENGINE_CONTROL_BIND_PORT=5000
