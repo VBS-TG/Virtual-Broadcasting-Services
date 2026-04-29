@@ -1,4 +1,21 @@
 services:
+  # 0. RTC Reverse Proxy（vbsrtc domain -> local WHEP workers）
+  vbs-rtc-nginx:
+    image: nginx:alpine
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-srt-whep-1
+      - vbs-srt-whep-2
+      - vbs-srt-whep-3
+      - vbs-srt-whep-4
+      - vbs-srt-whep-5
+      - vbs-srt-whep-6
+      - vbs-srt-whep-7
+      - vbs-srt-whep-8
+    volumes:
+      - ./docs/deploy/nginx-vbsrtc.conf:/etc/nginx/conf.d/default.conf:ro
+
   # 1. 媒體執行引擎 (Strom)
   vbs-strom:
     image: eyevinntechnology/strom:latest

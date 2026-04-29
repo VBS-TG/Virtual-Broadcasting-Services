@@ -1,11 +1,11 @@
-# Engine 信令 Cloudflare Tunnel（rtc 子網域）
-# 僅代理 HTTP/WebSocket 信令；WebRTC 媒體仍走 ICE/UDP 直連
+# RTC Cloudflare Tunnel（vbsrtc 子網域）
+# 本範例將 vbsrtc 轉發到本機 Nginx 18010，再由 Nginx 分流至 8 路 srt-whep
 
 tunnel: vbs-engine-rtc
 credentials-file: /etc/cloudflared/vbs-engine-rtc.json
 
 ingress:
-  - hostname: rtc.yourdomain.com
-    service: http://127.0.0.1:5000
+  - hostname: vbsrtc.cyblisswisdom.org
+    service: http://127.0.0.1:18010
   - service: http_status:404
 
