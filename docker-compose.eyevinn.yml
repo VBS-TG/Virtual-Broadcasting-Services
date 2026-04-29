@@ -15,7 +15,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - path: .env.console
+      - ./.env.engine
     environment:
       - COUCHDB_USER=${VBS_DB_USER:-admin}
       - COUCHDB_PASSWORD=${VBS_DB_PASSWORD:-admin1234}
@@ -29,7 +29,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - ./env/.env.engine
+      - ./.env.engine
     depends_on:
       - vbs-couchdb
       - vbs-strom
