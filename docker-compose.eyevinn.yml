@@ -2,7 +2,6 @@ services:
   # 1. 媒體執行引擎 (Strom)
   vbs-strom:
     image: eyevinntechnology/strom:latest
-    container_name: vbs-strom
     restart: always
     network_mode: host
     volumes:
@@ -11,7 +10,6 @@ services:
   # 2. 持久化資料庫 (CouchDB)
   vbs-couchdb:
     image: couchdb:3
-    container_name: vbs-couchdb
     restart: always
     network_mode: host
     env_file:
@@ -25,7 +23,6 @@ services:
   # 3. 中央管理 API (Open Live)
   vbs-open-live:
     image: vbs-open-live:local
-    container_name: vbs-open-live
     restart: always
     network_mode: host
     env_file:
@@ -43,7 +40,6 @@ services:
   # 4. SRT -> WHEP Gateway x8（1格1路，對應 input1..input8）
   vbs-srt-whep-1:
     image: eyevinntechnology/srt-whep:latest
-    container_name: vbs-srt-whep-1
     restart: always
     network_mode: host
     depends_on:
@@ -56,7 +52,6 @@ services:
 
   vbs-srt-whep-2:
     image: eyevinntechnology/srt-whep:latest
-    container_name: vbs-srt-whep-2
     restart: always
     network_mode: host
     depends_on:
@@ -69,7 +64,6 @@ services:
 
   vbs-srt-whep-3:
     image: eyevinntechnology/srt-whep:latest
-    container_name: vbs-srt-whep-3
     restart: always
     network_mode: host
     depends_on:
@@ -82,7 +76,6 @@ services:
 
   vbs-srt-whep-4:
     image: eyevinntechnology/srt-whep:latest
-    container_name: vbs-srt-whep-4
     restart: always
     network_mode: host
     depends_on:
@@ -95,7 +88,6 @@ services:
 
   vbs-srt-whep-5:
     image: eyevinntechnology/srt-whep:latest
-    container_name: vbs-srt-whep-5
     restart: always
     network_mode: host
     depends_on:
@@ -108,7 +100,6 @@ services:
 
   vbs-srt-whep-6:
     image: eyevinntechnology/srt-whep:latest
-    container_name: vbs-srt-whep-6
     restart: always
     network_mode: host
     depends_on:
@@ -121,7 +112,6 @@ services:
 
   vbs-srt-whep-7:
     image: eyevinntechnology/srt-whep:latest
-    container_name: vbs-srt-whep-7
     restart: always
     network_mode: host
     depends_on:
@@ -134,7 +124,6 @@ services:
 
   vbs-srt-whep-8:
     image: eyevinntechnology/srt-whep:latest
-    container_name: vbs-srt-whep-8
     restart: always
     network_mode: host
     depends_on:
