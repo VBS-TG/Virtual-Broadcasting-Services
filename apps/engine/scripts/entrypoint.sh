@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ -z "${VBS_EYEVINN_OPENLIVE_BASE_URL:-}" ]]; then
-  echo "錯誤: 需設定 VBS_EYEVINN_OPENLIVE_BASE_URL（Eyevinn Open Live 控制端點）" >&2
+  echo "錯誤: 需設定 VBS_EYEVINN_OPENLIVE_BASE_URL（Eyevinn Open Live 控制端點；可使用 https://vbsapi.cyblisswisdom.org 並由路徑分流）" >&2
   exit 1
 fi
 

@@ -272,12 +272,12 @@ function matchInboundAccessServiceToken(req: IncomingMessage): boolean {
 async function authorized(req: IncomingMessage): Promise<boolean> {
   // Release policy:
   // 1) preferred M2M service token from Console orchestrator
-  // 2) fallback Cloudflare JWT assertion, but only node identity may pass
+  // 2) fallback Cloudflare JWT assertion, but only console identity may pass
   if (matchInboundAccessServiceToken(req)) return true;
   const cfAssertion = String(req.headers["cf-access-jwt-assertion"] ?? "").trim();
   if (!cfAssertion) return false;
   const role = await resolveCloudflareRole(cfAssertion);
-  return role === "node";
+  return role === "console";
 }
 
 async function resolveCloudflareRole(raw: string): Promise<string> {
@@ -288,10 +288,17 @@ async function resolveCloudflareRole(raw: string): Promise<string> {
   const role = String(payload.role ?? "").trim().toLowerCase();
   if (role) return role;
   const commonName = String(payload.common_name ?? "").trim().toLowerCase();
+  if (matchesConsoleServiceClientID(commonName)) return "console";
   if (commonName.startsWith(nodeCNPrefix)) return "node";
-  // Cloudflare Service Token 常見以 "<client_id>.access" 形式出現在 common_name。
-  if (commonName.endsWith(".access")) return "node";
   return "";
+}
+
+function matchesConsoleServiceClientID(commonName: string): boolean {
+  const id = cfAccessClientID.trim().toLowerCase();
+  if (!id || !commonName) return false;
+  if (commonName === id) return true;
+  if (!id.endsWith(".access") && commonName === `${id}.access`) return true;
+  return false;
 }
 
 function ensureSourceAllowed(source: string, cfg: RuntimeConfig): boolean {

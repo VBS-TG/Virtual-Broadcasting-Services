@@ -103,7 +103,7 @@ Engine 節點採 **Eyevinn Open Live 官方核心 + 本專案 Adapter**。
 
 | 變數 | 必填 | 說明 |
 | :--- | :--- | :--- |
-| `VBS_EYEVINN_OPENLIVE_BASE_URL` | 是 | Open Live 控制 API 根位址（例：`https://vbsrtc.cyblisswisdom.org`）。 |
+| `VBS_EYEVINN_OPENLIVE_BASE_URL` | 是 | Open Live 控制 API 根位址（建議單網域收斂：`https://vbsapi.cyblisswisdom.org`，並由路徑分流至 Open Live）。 |
 | `VBS_EYEVINN_OPENLIVE_APPLY_PATH` | 否 | Open Live runtime apply 路徑，預設 `/api/v1/runtime/config/apply`。 |
 | `VBS_EYEVINN_OPENLIVE_STATE_PATH` | 否 | Open Live switch state 路徑，預設 `/api/v1/switch/state`。 |
 | `VBS_EYEVINN_OPENLIVE_HEALTH_PATH` | 否 | Open Live health 路徑，預設 `/healthz`。 |

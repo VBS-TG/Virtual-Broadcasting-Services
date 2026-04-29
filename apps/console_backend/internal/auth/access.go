@@ -43,6 +43,7 @@ type AccessJWTVerifier struct {
 	httpClient    *http.Client
 	adminEmailSet map[string]struct{}
 	nodeCNPrefix  string
+	serviceRoleByCN map[string]string
 	consoleIssuer string
 	consolePubKeys []ed25519.PublicKey
 	consolePrivKey ed25519.PrivateKey
@@ -63,7 +64,7 @@ type accessJWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duration, clockSkewLeeway time.Duration, adminEmails []string, nodeCNPrefix, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
+func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duration, clockSkewLeeway time.Duration, adminEmails []string, nodeCNPrefix, routeClientID, engineClientID, captureClientID, bffClientID, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
 	if strings.TrimSpace(aud) == "" {
 		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD is required")
 	}
@@ -91,6 +92,7 @@ func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duratio
 	if nodeCNPrefix == "" {
 		return nil, fmt.Errorf("node common_name prefix is required")
 	}
+	serviceRoleByCN := buildServiceRoleByCN(routeClientID, engineClientID, captureClientID, bffClientID)
 	consoleIssuer = strings.TrimSpace(consoleIssuer)
 	if consoleIssuer == "" {
 		return nil, fmt.Errorf("console issuer is required")
@@ -118,6 +120,7 @@ func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duratio
 		httpClient:    &http.Client{Timeout: 8 * time.Second},
 		adminEmailSet: adminSet,
 		nodeCNPrefix:  nodeCNPrefix,
+		serviceRoleByCN: serviceRoleByCN,
 		consoleIssuer: consoleIssuer,
 		consolePubKeys: pubKeys,
 		consolePrivKey: priv,
@@ -320,14 +323,32 @@ func (v *AccessJWTVerifier) mapCloudflareRole(email, commonName string) string {
 			return "admin"
 		}
 	}
+	if role, ok := v.serviceRoleByCN[commonName]; ok {
+		return role
+	}
 	if strings.HasPrefix(commonName, v.nodeCNPrefix) {
 		return "node"
 	}
-	// Cloudflare Service Token 常見以 "<client_id>.access" 形式出現在 common_name。
-	if strings.HasSuffix(commonName, ".access") {
-		return "node"
-	}
 	return ""
+}
+
+func buildServiceRoleByCN(routeClientID, engineClientID, captureClientID, bffClientID string) map[string]string {
+	out := map[string]string{}
+	add := func(clientID, role string) {
+		id := strings.TrimSpace(strings.ToLower(clientID))
+		if id == "" {
+			return
+		}
+		out[id] = role
+		if !strings.HasSuffix(id, ".access") {
+			out[id+".access"] = role
+		}
+	}
+	add(routeClientID, "route")
+	add(engineClientID, "engine")
+	add(captureClientID, "capture")
+	add(bffClientID, "bff")
+	return out
 }
 
 func (v *AccessJWTVerifier) lookupKey(kid string) (any, error) {

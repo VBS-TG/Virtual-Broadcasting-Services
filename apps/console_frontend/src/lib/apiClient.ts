@@ -78,21 +78,11 @@ function resolvePublicApiBase(): string {
 
 function resolveApiBase(rawBase: string): string {
   const trimmed = rawBase.trim()
-  if (!trimmed) return '/api/proxy'
-  if (trimmed === 'https://vbs.cyblisswisdom.org') return '/api/proxy'
-  if (trimmed === 'https://vbsapi.cyblisswisdom.org') return '/api/proxy'
-  return trimmed
-}
-
-function isDirectConsolePath(path: string): boolean {
-  return (
-    path === '/api/v1/auth/admin/email-login' ||
-    path === '/api/v1/guest/exchange-pin'
-  )
+  if (!trimmed) return resolvePublicApiBase()
+  return trimmed.replace(/\/+$/, '')
 }
 
 function resolveRequestURL(apiBase: string, path: string): string {
-  if (isDirectConsolePath(path)) return `${resolvePublicApiBase()}${path}`
   return `${apiBase}${path}`
 }
 
@@ -176,7 +166,8 @@ async function tryRefreshAdminToken(timeoutMs: number): Promise<boolean> {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const res = await fetch(`${resolvePublicApiBase()}/api/v1/auth/admin/email-login`, {
+      const apiBase = resolveApiBase(useSettingsStore.getState().settings.apiBaseUrl)
+      const res = await fetch(`${apiBase}/api/v1/auth/admin/email-login`, {
         method: 'POST',
         signal: controller.signal,
         credentials: 'include',

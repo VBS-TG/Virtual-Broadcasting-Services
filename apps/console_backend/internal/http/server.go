@@ -136,6 +136,10 @@ func New(cfg *config.Config) *Server {
 		cfg.JWTClockSkewLeeway,
 		cfg.AdminEmails,
 		cfg.NodeCNPrefix,
+		cfg.RouteAccessClientID,
+		cfg.EngineAccessClientID,
+		cfg.CaptureAccessClientID,
+		cfg.BFFProxyAccessClientID,
 		cfg.ConsoleJWTIssuer,
 		cfg.ConsoleJWTPrivateKey,
 		cfg.ConsoleJWTPublicKeys,
@@ -168,8 +172,132 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if err := s.authorizeServiceRequest(r); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, trimErr(err)), http.StatusForbidden)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) authorizeServiceRequest(r *http.Request) error {
+	path := strings.TrimSpace(r.URL.Path)
+	if path == "/healthz" || path == "/api/v1/auth/admin/email-login" || path == "/api/v1/guest/exchange-pin" {
+		return nil
+	}
+	claims, err := s.access.VerifyRequestPreferBearer(r)
+	if err != nil {
+		// Keep legacy handler-level behavior for human/admin flows without preflight auth.
+		return nil
+	}
+	role := strings.TrimSpace(strings.ToLower(claims.Role))
+	if role == "" || role == "admin" || role == "guest" {
+		return nil
+	}
+	if s.servicePathAllowed(role, r.Method, path) {
+		return nil
+	}
+	return fmt.Errorf("forbidden: role %s cannot access %s %s", role, r.Method, path)
+}
+
+func (s *Server) servicePathAllowed(role, method, path string) bool {
+	role = strings.TrimSpace(strings.ToLower(role))
+	method = strings.TrimSpace(strings.ToUpper(method))
+	path = strings.TrimSpace(path)
+	for _, rule := range serviceACLRules {
+		if !rule.matchesRole(role) {
+			continue
+		}
+		if !rule.matchesMethod(method) {
+			continue
+		}
+		if rule.matchesPath(path) {
+			return true
+		}
+	}
+	return false
+}
+
+type serviceACLRule struct {
+	roles         map[string]struct{}
+	allowAllRoles bool
+	methods       map[string]struct{}
+	prefixes      []string
+	exacts        []string
+}
+
+func (r serviceACLRule) matchesRole(role string) bool {
+	if r.allowAllRoles {
+		return true
+	}
+	_, ok := r.roles[role]
+	return ok
+}
+
+func (r serviceACLRule) matchesMethod(method string) bool {
+	if len(r.methods) == 0 {
+		return true
+	}
+	_, ok := r.methods[method]
+	return ok
+}
+
+func (r serviceACLRule) matchesPath(path string) bool {
+	for _, exact := range r.exacts {
+		if path == exact {
+			return true
+		}
+	}
+	for _, prefix := range r.prefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func set(values ...string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(strings.ToLower(v))
+		if v != "" {
+			out[v] = struct{}{}
+		}
+	}
+	return out
+}
+
+func methodSet(values ...string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(strings.ToUpper(v))
+		if v != "" {
+			out[v] = struct{}{}
+		}
+	}
+	return out
+}
+
+var serviceACLRules = []serviceACLRule{
+	{
+		roles:    set("bff"),
+		prefixes: []string{"/api/proxy/"},
+	},
+	{
+		roles:    set("node", "route", "engine", "capture", "console"),
+		methods:  methodSet(http.MethodGet),
+		prefixes: []string{"/vbs/telemetry/ws"},
+	},
+	{
+		roles:   set("node", "route", "engine", "capture", "console"),
+		methods: methodSet(http.MethodPost),
+		exacts:  []string{"/api/v1/guest/introspect"},
+	},
+	{
+		roles:   set("console"),
+		methods: methodSet(http.MethodGet),
+		exacts:  []string{"/vbs/telemetry/events/ws", "/vbs/control/ws", "/api/v1/telemetry/latest"},
+	},
 }
 
 func (s *Server) isAllowedOrigin(origin string) bool {
@@ -436,6 +564,10 @@ func (s *Server) controlAuthorized(r *http.Request) bool {
 	claims, err := s.access.VerifyRequestPreferBearer(r)
 	if err != nil {
 		return false
+	}
+	role := strings.TrimSpace(strings.ToLower(claims.Role))
+	if role == "bff" {
+		return strings.HasPrefix(strings.TrimSpace(r.URL.Path), "/api/proxy/")
 	}
 	if !auth.CanControlPlane(claims.Role) {
 		return false

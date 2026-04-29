@@ -35,3 +35,108 @@ services:
       - COUCHDB_NAME=open-live
       - STROM_URL=http://127.0.0.1:8080
       - LOG_LEVEL=info
+
+  # 4. SRT -> WHEP Gateway x8（1格1路，對應 input1..input8）
+  vbs-srt-whep-1:
+    image: eyevinntechnology/srt-whep:latest
+    container_name: vbs-srt-whep-1
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i ${VBS_SRT_WHEP_INPUT_1:-127.0.0.1:20031}
+      -o ${VBS_SRT_WHEP_PASSTHROUGH_1:-0.0.0.0:18881}
+      -p ${VBS_SRT_WHEP_HTTP_PORT_1:-18001}
+      -s ${VBS_SRT_WHEP_MODE_1:-caller}
+
+  vbs-srt-whep-2:
+    image: eyevinntechnology/srt-whep:latest
+    container_name: vbs-srt-whep-2
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i ${VBS_SRT_WHEP_INPUT_2:-127.0.0.1:20032}
+      -o ${VBS_SRT_WHEP_PASSTHROUGH_2:-0.0.0.0:18882}
+      -p ${VBS_SRT_WHEP_HTTP_PORT_2:-18002}
+      -s ${VBS_SRT_WHEP_MODE_2:-caller}
+
+  vbs-srt-whep-3:
+    image: eyevinntechnology/srt-whep:latest
+    container_name: vbs-srt-whep-3
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i ${VBS_SRT_WHEP_INPUT_3:-127.0.0.1:20033}
+      -o ${VBS_SRT_WHEP_PASSTHROUGH_3:-0.0.0.0:18883}
+      -p ${VBS_SRT_WHEP_HTTP_PORT_3:-18003}
+      -s ${VBS_SRT_WHEP_MODE_3:-caller}
+
+  vbs-srt-whep-4:
+    image: eyevinntechnology/srt-whep:latest
+    container_name: vbs-srt-whep-4
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i ${VBS_SRT_WHEP_INPUT_4:-127.0.0.1:20034}
+      -o ${VBS_SRT_WHEP_PASSTHROUGH_4:-0.0.0.0:18884}
+      -p ${VBS_SRT_WHEP_HTTP_PORT_4:-18004}
+      -s ${VBS_SRT_WHEP_MODE_4:-caller}
+
+  vbs-srt-whep-5:
+    image: eyevinntechnology/srt-whep:latest
+    container_name: vbs-srt-whep-5
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i ${VBS_SRT_WHEP_INPUT_5:-127.0.0.1:20035}
+      -o ${VBS_SRT_WHEP_PASSTHROUGH_5:-0.0.0.0:18885}
+      -p ${VBS_SRT_WHEP_HTTP_PORT_5:-18005}
+      -s ${VBS_SRT_WHEP_MODE_5:-caller}
+
+  vbs-srt-whep-6:
+    image: eyevinntechnology/srt-whep:latest
+    container_name: vbs-srt-whep-6
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i ${VBS_SRT_WHEP_INPUT_6:-127.0.0.1:20036}
+      -o ${VBS_SRT_WHEP_PASSTHROUGH_6:-0.0.0.0:18886}
+      -p ${VBS_SRT_WHEP_HTTP_PORT_6:-18006}
+      -s ${VBS_SRT_WHEP_MODE_6:-caller}
+
+  vbs-srt-whep-7:
+    image: eyevinntechnology/srt-whep:latest
+    container_name: vbs-srt-whep-7
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i ${VBS_SRT_WHEP_INPUT_7:-127.0.0.1:20037}
+      -o ${VBS_SRT_WHEP_PASSTHROUGH_7:-0.0.0.0:18887}
+      -p ${VBS_SRT_WHEP_HTTP_PORT_7:-18007}
+      -s ${VBS_SRT_WHEP_MODE_7:-caller}
+
+  vbs-srt-whep-8:
+    image: eyevinntechnology/srt-whep:latest
+    container_name: vbs-srt-whep-8
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i ${VBS_SRT_WHEP_INPUT_8:-127.0.0.1:20038}
+      -o ${VBS_SRT_WHEP_PASSTHROUGH_8:-0.0.0.0:18888}
+      -p ${VBS_SRT_WHEP_HTTP_PORT_8:-18008}
+      -s ${VBS_SRT_WHEP_MODE_8:-caller}

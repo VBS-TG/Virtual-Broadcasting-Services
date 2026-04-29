@@ -15,6 +15,7 @@ interface MultiviewerProps {
 }
 
 const CELL_COLORS = ['#0a1628', '#0d1a2e', '#1a0d28', '#1e1408', '#0a1520', '#0a1e14', '#151510', '#080808']
+const WHEP_URL_TEMPLATE = String(import.meta.env.VITE_WHEP_URL_TEMPLATE ?? '').trim()
 
 function sourceToIndex(source: string): number {
   const n = Number(String(source ?? '').replace('input', ''))
@@ -127,12 +128,43 @@ export default function Multiviewer({
   )
 }
 
-function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: { id: number; label: string; color: string }; isPgm?: boolean; isPvw?: boolean; isLarge?: boolean; labelOverride?: string }) {
+function buildWhepURL(sourceID: number): string {
+  if (!WHEP_URL_TEMPLATE) return ''
+  const source = `input${sourceID}`
+  if (WHEP_URL_TEMPLATE.includes('{source}')) {
+    return WHEP_URL_TEMPLATE.replaceAll('{source}', source)
+  }
+  return WHEP_URL_TEMPLATE
+}
+
+async function waitIceGathering(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === 'complete') return
+  await new Promise<void>((resolve) => {
+    const onState = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', onState)
+        resolve()
+      }
+    }
+    pc.addEventListener('icegatheringstatechange', onState)
+    setTimeout(() => {
+      pc.removeEventListener('icegatheringstatechange', onState)
+      resolve()
+    }, 1500)
+  })
+}
+
+function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: { id: number; sourceIndex?: number; label: string; color: string }; isPgm?: boolean; isPvw?: boolean; isLarge?: boolean; labelOverride?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const [fps, setFps] = useState(60)
   const [bitrate, setBitrate] = useState(Math.floor(Math.random() * 3000 + 4000))
+  const [streamReady, setStreamReady] = useState(false)
+  const mappedSource = Number(cell.sourceIndex ?? cell.id)
+  const whepURL = buildWhepURL(mappedSource)
 
   useEffect(() => {
+    if (whepURL) return
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')!
@@ -147,7 +179,7 @@ function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: { id: 
       ctx.fillRect(0, 0, w, h)
       ctx.fillStyle = 'rgba(0,0,0,0.12)'
       for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1)
-      if (cell.id !== 8) {
+      if (mappedSource !== 8) {
         for (let i = 0; i < 3; i++) {
           const x = (Math.sin(frame * 0.02 + i * 2.1) * 0.3 + 0.5) * w
           const y = (Math.cos(frame * 0.015 + i * 1.7) * 0.3 + 0.5) * h
@@ -159,25 +191,84 @@ function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: { id: 
     }
     draw()
     return () => cancelAnimationFrame(raf)
-  }, [cell])
+  }, [cell, whepURL, mappedSource])
 
   useEffect(() => {
-    if (cell.id === 8) return
+    if (!whepURL) {
+      setStreamReady(false)
+      return
+    }
+    const video = videoRef.current
+    if (!video) return
+    let resourceURL = ''
+    const pc = new RTCPeerConnection()
+    let cancelled = false
+
+    pc.ontrack = (ev) => {
+      if (!video) return
+      video.srcObject = ev.streams?.[0] ?? null
+      setStreamReady(true)
+    }
+
+    ;(async () => {
+      try {
+        pc.addTransceiver('video', { direction: 'recvonly' })
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        await waitIceGathering(pc)
+        const sdp = pc.localDescription?.sdp ?? ''
+        if (!sdp) throw new Error('missing local sdp')
+        const res = await fetch(whepURL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/sdp' },
+          body: sdp,
+        })
+        if (!res.ok) throw new Error(`WHEP status ${res.status}`)
+        const answerSDP = await res.text()
+        const location = String(res.headers.get('Location') ?? '').trim()
+        if (location) resourceURL = new URL(location, whepURL).toString()
+        if (!cancelled) {
+          await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP })
+          setStreamReady(true)
+        }
+      } catch {
+        setStreamReady(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      const stream = video.srcObject as MediaStream | null
+      stream?.getTracks().forEach((t) => t.stop())
+      video.srcObject = null
+      pc.close()
+      if (resourceURL) {
+        fetch(resourceURL, { method: 'DELETE' }).catch(() => undefined)
+      }
+    }
+  }, [whepURL])
+
+  useEffect(() => {
+    if (mappedSource === 8) return
     const t = setInterval(() => {
       setFps(58 + Math.floor(Math.random() * 4))
       setBitrate((b) => Math.max(3500, Math.min(8000, b + (Math.random() - 0.5) * 200)))
     }, 1000)
     return () => clearInterval(t)
-  }, [cell.id])
+  }, [mappedSource])
 
   return (
     <div className={`relative w-full h-full rounded-md overflow-hidden border transition-all duration-300
       ${isPgm ? 'border-vbs-pgm shadow-pgm z-10' : isPvw ? 'border-vbs-pvw shadow-pvw z-10' : 'border-white/5'}`}>
-      <canvas ref={canvasRef} width={320} height={180} className="w-full h-full object-cover" />
+      {streamReady ? (
+        <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+      ) : (
+        <canvas ref={canvasRef} width={320} height={180} className="w-full h-full object-cover" />
+      )}
 
       <div className={`absolute bottom-0 left-0 right-0 flex items-center ${isLarge ? 'justify-center py-1.5 bg-black/70' : 'justify-between px-1.5 py-0.5 bg-black/60'} backdrop-blur-sm`}>
         <span className={`${isLarge ? 'text-[20px] tracking-widest' : 'text-[12px] sm:text-[15px]'} font-bold text-white`}>{labelOverride || cell.label}</span>
-        {cell.id !== 8 && !isLarge && (
+        {mappedSource !== 8 && !isLarge && (
           <div className="hidden sm:flex items-center gap-1.5">
             <span className="text-[15px] text-vbs-pvw">{fps}fps</span>
             <span className="text-[15px] text-vbs-muted">{(bitrate / 1000).toFixed(1)}M</span>
@@ -196,7 +287,7 @@ function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: { id: 
         </div>
       )}
 
-      {cell.id !== 8 && (
+      {mappedSource !== 8 && (
         <div className="absolute top-1 right-1 flex items-end gap-[2px] h-4">
           <VuBar /><VuBar />
         </div>

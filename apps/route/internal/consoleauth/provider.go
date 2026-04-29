@@ -31,6 +31,7 @@ type Provider struct {
 	cfIssuer      string
 	aud           string
 	nodeCNPrefix  string
+	serviceRoleByCN map[string]string
 
 	mu        sync.RWMutex
 	keys      map[string]any
@@ -55,6 +56,7 @@ func NewProvider(cfg config.Config) *Provider {
 		cfIssuer: issuer,
 		aud:      cfg.CFAccessAUD,
 		nodeCNPrefix: strings.TrimSpace(strings.ToLower(cfg.NodeCNPrefix)),
+		serviceRoleByCN: buildServiceRoleByCN(cfg.CFAccessClientID),
 		keys: map[string]any{},
 	}
 }
@@ -108,14 +110,26 @@ func (p *Provider) verifyCloudflareBearer(raw string) (*Claims, error) {
 }
 
 func (p *Provider) mapCloudflareRole(commonName string) string {
+	if role, ok := p.serviceRoleByCN[commonName]; ok {
+		return role
+	}
 	if strings.HasPrefix(commonName, p.nodeCNPrefix) {
 		return "node"
 	}
-	// Cloudflare Service Token 常見以 "<client_id>.access" 形式出現在 common_name。
-	if strings.HasSuffix(commonName, ".access") {
-		return "node"
-	}
 	return ""
+}
+
+func buildServiceRoleByCN(consoleClientID string) map[string]string {
+	out := map[string]string{}
+	id := strings.TrimSpace(strings.ToLower(consoleClientID))
+	if id == "" {
+		return out
+	}
+	out[id] = "console"
+	if !strings.HasSuffix(id, ".access") {
+		out[id+".access"] = "console"
+	}
+	return out
 }
 
 func (p *Provider) lookupKey(kid string) (any, error) {

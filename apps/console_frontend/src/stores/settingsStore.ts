@@ -3,9 +3,8 @@ import { persist } from 'zustand/middleware'
 import type { AppSettings } from '../types'
 
 const DEFAULT: AppSettings = {
-  // Production frontend domain: vbs.cyblisswisdom.org
-  // BFF proxy base on same-origin console backend
-  apiBaseUrl: '/api/proxy',
+  // 統一 API 入口：vbsapi.cyblisswisdom.org
+  apiBaseUrl: 'https://vbsapi.cyblisswisdom.org',
   refreshInterval: 1000,
   theme: 'dark',
   apiTimeoutMs: 10000,

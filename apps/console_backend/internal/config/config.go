@@ -130,7 +130,7 @@ func Load() (*Config, error) {
 		ListenAddr:         listen,
 		TelemetryMax:       maxPayload,
 		NodeOfflineTTL:     time.Duration(offlineTTL) * time.Second,
-		CORSAllowedOrigins: splitCSVRaw(getenvDefault("VBS_CORS_ALLOWED_ORIGINS", "https://vbs.cyblisswisdom.org,http://localhost:5173")),
+		CORSAllowedOrigins: splitCSVRaw(getenvDefault("VBS_CORS_ALLOWED_ORIGINS", "https://vbs.cyblisswisdom.org,https://vbsapi.cyblisswisdom.org,http://localhost:5173")),
 		NTPCheckURL: getenvDefault("VBS_NTP_CHECK_URL", "https://vbsapi.cyblisswisdom.org/healthz"),
 		NTPCheckTimeout: time.Duration(getenvIntDefault("VBS_NTP_CHECK_TIMEOUT_MS", 5000)) * time.Millisecond,
 		NTPMaxSkew: time.Duration(getenvIntDefault("VBS_NTP_MAX_SKEW_SEC", 5)) * time.Second,

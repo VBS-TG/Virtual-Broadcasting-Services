@@ -607,7 +607,7 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleauth.Provider) bool {
 	// Release policy:
 	// 1) Preferred M2M path: Cf-Access-Client-Id/Secret from Console orchestrator.
-	// 2) Fallback path: Cf-Access-Jwt-Assertion (Cloudflare JWT), but only "node" identity is accepted.
+	// 2) Fallback path: Cf-Access-Jwt-Assertion (Cloudflare JWT), but only "console" identity is accepted.
 	if matchInboundAccessServiceToken(r, cfg) {
 		return true
 	}
@@ -624,7 +624,7 @@ func authorizedControlPlane(r *http.Request, cfg config.Config, auth *consoleaut
 		return false
 	}
 	role := strings.TrimSpace(strings.ToLower(claims.Role))
-	return role == "node"
+	return role == "console"
 }
 
 // matchInboundAccessServiceToken 比對節點上設定之 Access Service Token；須與 Console 端
