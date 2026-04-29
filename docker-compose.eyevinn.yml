@@ -54,7 +54,7 @@ services:
       - STROM_URL=http://127.0.0.1:8080
       - LOG_LEVEL=info
 
-  # 4. SRT -> WHEP Gateway x8（1格1路，對應 input1..input8）
+  # 4. SRT -> WHEP Gateway x8（正式版：每路 ingest Route read streamid）
   vbs-srt-whep-1:
     image: eyevinntechnology/srt-whep:latest
     restart: always
@@ -62,7 +62,7 @@ services:
     depends_on:
       - vbs-open-live
     command: >
-      -i ${VBS_SRT_WHEP_INPUT_1:-127.0.0.1:20031}
+      -i ${VBS_SRT_WHEP_INPUT_1:-srt://127.0.0.1:20030?mode=caller&streamid=read/input1}
       -o ${VBS_SRT_WHEP_PASSTHROUGH_1:-0.0.0.0:18881}
       -p ${VBS_SRT_WHEP_HTTP_PORT_1:-18001}
       -s ${VBS_SRT_WHEP_MODE_1:-caller}
@@ -74,7 +74,7 @@ services:
     depends_on:
       - vbs-open-live
     command: >
-      -i ${VBS_SRT_WHEP_INPUT_2:-127.0.0.1:20032}
+      -i ${VBS_SRT_WHEP_INPUT_2:-srt://127.0.0.1:20030?mode=caller&streamid=read/input2}
       -o ${VBS_SRT_WHEP_PASSTHROUGH_2:-0.0.0.0:18882}
       -p ${VBS_SRT_WHEP_HTTP_PORT_2:-18002}
       -s ${VBS_SRT_WHEP_MODE_2:-caller}
@@ -86,7 +86,7 @@ services:
     depends_on:
       - vbs-open-live
     command: >
-      -i ${VBS_SRT_WHEP_INPUT_3:-127.0.0.1:20033}
+      -i ${VBS_SRT_WHEP_INPUT_3:-srt://127.0.0.1:20030?mode=caller&streamid=read/input3}
       -o ${VBS_SRT_WHEP_PASSTHROUGH_3:-0.0.0.0:18883}
       -p ${VBS_SRT_WHEP_HTTP_PORT_3:-18003}
       -s ${VBS_SRT_WHEP_MODE_3:-caller}
@@ -98,7 +98,7 @@ services:
     depends_on:
       - vbs-open-live
     command: >
-      -i ${VBS_SRT_WHEP_INPUT_4:-127.0.0.1:20034}
+      -i ${VBS_SRT_WHEP_INPUT_4:-srt://127.0.0.1:20030?mode=caller&streamid=read/input4}
       -o ${VBS_SRT_WHEP_PASSTHROUGH_4:-0.0.0.0:18884}
       -p ${VBS_SRT_WHEP_HTTP_PORT_4:-18004}
       -s ${VBS_SRT_WHEP_MODE_4:-caller}
@@ -110,7 +110,7 @@ services:
     depends_on:
       - vbs-open-live
     command: >
-      -i ${VBS_SRT_WHEP_INPUT_5:-127.0.0.1:20035}
+      -i ${VBS_SRT_WHEP_INPUT_5:-srt://127.0.0.1:20030?mode=caller&streamid=read/input5}
       -o ${VBS_SRT_WHEP_PASSTHROUGH_5:-0.0.0.0:18885}
       -p ${VBS_SRT_WHEP_HTTP_PORT_5:-18005}
       -s ${VBS_SRT_WHEP_MODE_5:-caller}
@@ -122,7 +122,7 @@ services:
     depends_on:
       - vbs-open-live
     command: >
-      -i ${VBS_SRT_WHEP_INPUT_6:-127.0.0.1:20036}
+      -i ${VBS_SRT_WHEP_INPUT_6:-srt://127.0.0.1:20030?mode=caller&streamid=read/input6}
       -o ${VBS_SRT_WHEP_PASSTHROUGH_6:-0.0.0.0:18886}
       -p ${VBS_SRT_WHEP_HTTP_PORT_6:-18006}
       -s ${VBS_SRT_WHEP_MODE_6:-caller}
@@ -134,7 +134,7 @@ services:
     depends_on:
       - vbs-open-live
     command: >
-      -i ${VBS_SRT_WHEP_INPUT_7:-127.0.0.1:20037}
+      -i ${VBS_SRT_WHEP_INPUT_7:-srt://127.0.0.1:20030?mode=caller&streamid=read/input7}
       -o ${VBS_SRT_WHEP_PASSTHROUGH_7:-0.0.0.0:18887}
       -p ${VBS_SRT_WHEP_HTTP_PORT_7:-18007}
       -s ${VBS_SRT_WHEP_MODE_7:-caller}
@@ -146,7 +146,7 @@ services:
     depends_on:
       - vbs-open-live
     command: >
-      -i ${VBS_SRT_WHEP_INPUT_8:-127.0.0.1:20038}
+      -i ${VBS_SRT_WHEP_INPUT_8:-srt://127.0.0.1:20030?mode=caller&streamid=read/input8}
       -o ${VBS_SRT_WHEP_PASSTHROUGH_8:-0.0.0.0:18888}
       -p ${VBS_SRT_WHEP_HTTP_PORT_8:-18008}
       -s ${VBS_SRT_WHEP_MODE_8:-caller}

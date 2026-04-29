@@ -154,6 +154,41 @@ async function waitIceGathering(pc: RTCPeerConnection): Promise<void> {
   })
 }
 
+function looksLikeSDP(raw: string): boolean {
+  const s = String(raw ?? '').trim()
+  return s.startsWith('v=0')
+}
+
+async function postServerOfferInit(whepURL: string): Promise<{ offerSDP: string; resourceURL: string }> {
+  const res = await fetch(whepURL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sdp' },
+    body: '',
+  })
+  const body = await res.text()
+  if (!res.ok || !looksLikeSDP(body)) {
+    throw new Error(`server-init unavailable status=${res.status}`)
+  }
+  const location = String(res.headers.get('Location') ?? '').trim()
+  const resourceURL = location ? new URL(location, whepURL).toString() : whepURL
+  return { offerSDP: body, resourceURL }
+}
+
+async function sendAnswerToResource(resourceURL: string, answerSDP: string): Promise<void> {
+  const methods: Array<'PATCH' | 'POST' | 'PUT'> = ['PATCH', 'POST', 'PUT']
+  let lastErr = ''
+  for (const method of methods) {
+    const res = await fetch(resourceURL, {
+      method,
+      headers: { 'Content-Type': 'application/sdp' },
+      body: answerSDP,
+    })
+    if (res.ok) return
+    lastErr = `${method}:${res.status}`
+  }
+  throw new Error(`send answer failed ${lastErr}`)
+}
+
 function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: { id: number; sourceIndex?: number; label: string; color: string }; isPgm?: boolean; isPvw?: boolean; isLarge?: boolean; labelOverride?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -213,22 +248,38 @@ function ViewCell({ cell, isPgm, isPvw, isLarge, labelOverride }: { cell: { id: 
     ;(async () => {
       try {
         pc.addTransceiver('video', { direction: 'recvonly' })
-        const offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
-        await waitIceGathering(pc)
-        const sdp = pc.localDescription?.sdp ?? ''
-        if (!sdp) throw new Error('missing local sdp')
-        const res = await fetch(whepURL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/sdp' },
-          body: sdp,
-        })
-        if (!res.ok) throw new Error(`WHEP status ${res.status}`)
-        const answerSDP = await res.text()
-        const location = String(res.headers.get('Location') ?? '').trim()
-        if (location) resourceURL = new URL(location, whepURL).toString()
+        // Prefer server-init WHEP (srt-whep), fallback to client-init.
+        try {
+          const { offerSDP, resourceURL: sessionURL } = await postServerOfferInit(whepURL)
+          resourceURL = sessionURL
+          if (cancelled) return
+          await pc.setRemoteDescription({ type: 'offer', sdp: offerSDP })
+          const answer = await pc.createAnswer()
+          await pc.setLocalDescription(answer)
+          await waitIceGathering(pc)
+          const localAnswer = pc.localDescription?.sdp ?? ''
+          if (!localAnswer) throw new Error('missing local answer sdp')
+          await sendAnswerToResource(resourceURL, localAnswer)
+        } catch {
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          await waitIceGathering(pc)
+          const sdp = pc.localDescription?.sdp ?? ''
+          if (!sdp) throw new Error('missing local sdp')
+          const res = await fetch(whepURL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/sdp' },
+            body: sdp,
+          })
+          if (!res.ok) throw new Error(`WHEP status ${res.status}`)
+          const answerSDP = await res.text()
+          const location = String(res.headers.get('Location') ?? '').trim()
+          if (location) resourceURL = new URL(location, whepURL).toString()
+          if (!cancelled) {
+            await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP })
+          }
+        }
         if (!cancelled) {
-          await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP })
           setStreamReady(true)
         }
       } catch {

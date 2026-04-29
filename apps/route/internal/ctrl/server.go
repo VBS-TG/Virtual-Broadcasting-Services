@@ -2,9 +2,7 @@ package ctrl
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,6 +37,7 @@ type relayRouteStore struct {
 
 const maxPGMCount = 5
 const maxAUXCount = 20
+const fixedInputSlots = 8
 
 func newRelayRouteStore() *relayRouteStore {
 	routes := map[string]string{}
@@ -290,7 +289,7 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		resp := buildRelaySession(cfg, r.Host)
+		resp := buildRelaySession(cfg, r.Host, "pgm")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	})
@@ -316,7 +315,7 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 		for i := 1; i <= currentAuxCount; i++ {
 			items = append(items, auxItem{
 				Channel:      i,
-				relaySession: buildRelaySession(cfg, r.Host),
+				relaySession: buildRelaySession(cfg, r.Host, fmt.Sprintf("aux%d", i)),
 			})
 		}
 		resp := map[string]any{
@@ -325,6 +324,34 @@ func Start(ctx context.Context, cfg config.Config, state *rtstate.Buffer, restar
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	mux.HandleFunc("/api/v1/route/input/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizedControlPlane(r, cfg, auth) {
+			logger.Printf("[route][ctrl] 未授權的 API 請求 remote=%s path=%s", r.RemoteAddr, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		type inputItem struct {
+			Slot string `json:"slot"`
+			relaySession
+		}
+		items := make([]inputItem, 0, fixedInputSlots)
+		for i := 1; i <= fixedInputSlots; i++ {
+			slot := fmt.Sprintf("input%d", i)
+			items = append(items, inputItem{
+				Slot:         slot,
+				relaySession: buildRelaySession(cfg, r.Host, slot),
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"inputs": items,
+		})
 	})
 
 	mux.HandleFunc("/api/v1/route/runtime/config", func(w http.ResponseWriter, r *http.Request) {
@@ -647,18 +674,13 @@ func matchInboundAccessServiceToken(r *http.Request, cfg config.Config) bool {
 		subtle.ConstantTimeCompare([]byte(gotSecret), []byte(wantSecret)) == 1
 }
 
-func randomHex(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "00000000000000000000000000000000"
+func buildRelaySession(cfg config.Config, requestHost, slot string) relaySession {
+	slot = strings.ToLower(strings.TrimSpace(slot))
+	if slot == "" {
+		slot = "pgm"
 	}
-	return hex.EncodeToString(b)
-}
-
-func buildRelaySession(cfg config.Config, requestHost string) relaySession {
-	uuid := randomHex(16)
-	publish := fmt.Sprintf("%s/%s", cfg.PGMRelayPublishPrefix, uuid)
-	read := fmt.Sprintf("%s/%s", cfg.PGMRelayReadPrefix, uuid)
+	publish := fmt.Sprintf("%s/%s", cfg.PGMRelayPublishPrefix, slot)
+	read := fmt.Sprintf("%s/%s", cfg.PGMRelayReadPrefix, slot)
 	host := cfg.PGMRelayPublicHost
 	if host == "" {
 		host = requestHost
@@ -672,7 +694,7 @@ func buildRelaySession(cfg config.Config, requestHost string) relaySession {
 	readURL := fmt.Sprintf("srt://%s:%d?streamid=%s&passphrase=%s&latency=%d",
 		host, cfg.PGMRelayPublicPort, read, cfg.SRTPassphrase, cfg.PGMRelayLatencyMs)
 	return relaySession{
-		StreamUUID:      uuid,
+		StreamUUID:      slot,
 		PublishStreamID: publish,
 		ReadStreamID:    read,
 		PlaybackSRTURL:  readURL,
