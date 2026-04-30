@@ -30,7 +30,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     volumes:
       - ./data/couchdb:/opt/couchdb/data
 
@@ -40,7 +40,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-couchdb
       - vbs-strom
@@ -51,7 +51,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-open-live
     command: >
@@ -65,7 +65,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-open-live
     command: >
@@ -79,7 +79,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-open-live
     command: >
@@ -93,7 +93,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-open-live
     command: >
@@ -107,7 +107,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-open-live
     command: >
@@ -121,7 +121,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-open-live
     command: >
@@ -135,7 +135,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-open-live
     command: >
@@ -149,7 +149,7 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
     depends_on:
       - vbs-open-live
     command: >
@@ -166,4 +166,4 @@ services:
     restart: always
     network_mode: host
     env_file:
-      - .env
+      - .env.engine
