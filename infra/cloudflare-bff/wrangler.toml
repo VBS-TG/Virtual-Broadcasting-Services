@@ -1,0 +1,13 @@
+name = "vbs-bff-proxy"
+main = "worker.js"
+compatibility_date = "2026-05-01"
+
+[vars]
+API_ORIGIN = "https://vbsapi.cyblisswisdom.org"
+RTC_ORIGIN = "https://vbsrtc.cyblisswisdom.org"
+
+# Set routes after first deploy (adjust zone/route as needed), e.g.:
+# routes = [
+#   { pattern = "vbs.cyblisswisdom.org/api/*", zone_name = "cyblisswisdom.org" },
+#   { pattern = "vbs.cyblisswisdom.org/whep/*", zone_name = "cyblisswisdom.org" }
+# ]
