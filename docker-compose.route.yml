@@ -6,5 +6,5 @@ services:
       dockerfile: apps/route/Dockerfile
     network_mode: host
     env_file:
-      - path: env/.env.route
+      - path: .env.route
         required: false

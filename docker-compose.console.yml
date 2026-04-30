@@ -8,5 +8,5 @@ services:
       dockerfile: apps/console_backend/Dockerfile
     network_mode: host
     env_file:
-      - path: env/.env.console
+      - path: .env.console
         required: false
