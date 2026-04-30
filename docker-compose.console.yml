@@ -6,7 +6,8 @@ services:
     build:
       context: .
       dockerfile: apps/console_backend/Dockerfile
-    network_mode: host
+    ports:
+      - "5000:4000"
     env_file:
       - path: .env.console
         required: false
