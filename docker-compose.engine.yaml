@@ -1,0 +1,169 @@
+services:
+  # 0. RTC Reverse Proxy（vbsrtc domain -> local WHEP workers）
+  vbs-rtc-nginx:
+    image: nginx:alpine
+    restart: always
+    network_mode: host
+    depends_on:
+      - vbs-srt-whep-1
+      - vbs-srt-whep-2
+      - vbs-srt-whep-3
+      - vbs-srt-whep-4
+      - vbs-srt-whep-5
+      - vbs-srt-whep-6
+      - vbs-srt-whep-7
+      - vbs-srt-whep-8
+    volumes:
+      - ./docs/deploy/nginx-vbsrtc.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # 1. 媒體執行引擎 (Engine/Strom)
+  vbs-strom:
+    image: eyevinntechnology/strom:latest
+    restart: always
+    network_mode: host
+    volumes:
+      - ./data/strom:/data
+
+  # 2. 持久化資料庫 (CouchDB)
+  vbs-couchdb:
+    image: couchdb:3
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    volumes:
+      - ./data/couchdb:/opt/couchdb/data
+
+  # 3. 中央管理 API (Open Live)
+  vbs-open-live:
+    image: vbs-open-live:local
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-couchdb
+      - vbs-strom
+
+  # 4. SRT -> WHEP Gateway x8（正式版：每路 ingest Route read streamid）
+  vbs-srt-whep-1:
+    image: eyevinntechnology/srt-whep:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i $${VBS_SRT_WHEP_INPUT_1}
+      -o $${VBS_SRT_WHEP_PASSTHROUGH_1}
+      -p $${VBS_SRT_WHEP_HTTP_PORT_1}
+      -s $${VBS_SRT_WHEP_MODE_1}
+
+  vbs-srt-whep-2:
+    image: eyevinntechnology/srt-whep:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i $${VBS_SRT_WHEP_INPUT_2}
+      -o $${VBS_SRT_WHEP_PASSTHROUGH_2}
+      -p $${VBS_SRT_WHEP_HTTP_PORT_2}
+      -s $${VBS_SRT_WHEP_MODE_2}
+
+  vbs-srt-whep-3:
+    image: eyevinntechnology/srt-whep:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i $${VBS_SRT_WHEP_INPUT_3}
+      -o $${VBS_SRT_WHEP_PASSTHROUGH_3}
+      -p $${VBS_SRT_WHEP_HTTP_PORT_3}
+      -s $${VBS_SRT_WHEP_MODE_3}
+
+  vbs-srt-whep-4:
+    image: eyevinntechnology/srt-whep:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i $${VBS_SRT_WHEP_INPUT_4}
+      -o $${VBS_SRT_WHEP_PASSTHROUGH_4}
+      -p $${VBS_SRT_WHEP_HTTP_PORT_4}
+      -s $${VBS_SRT_WHEP_MODE_4}
+
+  vbs-srt-whep-5:
+    image: eyevinntechnology/srt-whep:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i $${VBS_SRT_WHEP_INPUT_5}
+      -o $${VBS_SRT_WHEP_PASSTHROUGH_5}
+      -p $${VBS_SRT_WHEP_HTTP_PORT_5}
+      -s $${VBS_SRT_WHEP_MODE_5}
+
+  vbs-srt-whep-6:
+    image: eyevinntechnology/srt-whep:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i $${VBS_SRT_WHEP_INPUT_6}
+      -o $${VBS_SRT_WHEP_PASSTHROUGH_6}
+      -p $${VBS_SRT_WHEP_HTTP_PORT_6}
+      -s $${VBS_SRT_WHEP_MODE_6}
+
+  vbs-srt-whep-7:
+    image: eyevinntechnology/srt-whep:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i $${VBS_SRT_WHEP_INPUT_7}
+      -o $${VBS_SRT_WHEP_PASSTHROUGH_7}
+      -p $${VBS_SRT_WHEP_HTTP_PORT_7}
+      -s $${VBS_SRT_WHEP_MODE_7}
+
+  vbs-srt-whep-8:
+    image: eyevinntechnology/srt-whep:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine
+    depends_on:
+      - vbs-open-live
+    command: >
+      -i $${VBS_SRT_WHEP_INPUT_8}
+      -o $${VBS_SRT_WHEP_PASSTHROUGH_8}
+      -p $${VBS_SRT_WHEP_HTTP_PORT_8}
+      -s $${VBS_SRT_WHEP_MODE_8}
+
+  # 5. Engine Adapter（併入同一 stack，避免雙 compose 造成 orphan/命名衝突）
+  vbs-engine:
+    build:
+      context: .
+      dockerfile: apps/engine/Dockerfile
+    restart: always
+    network_mode: host
+    env_file:
+      - env/.env.engine

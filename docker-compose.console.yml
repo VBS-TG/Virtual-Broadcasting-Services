@@ -1,24 +1,12 @@
 # Console — Cloudflare JWT 驗證、遙測 WSS、健康檢查。
-# 請直接使用 env/.env.console 覆寫到 .env.console 後再啟動（勿提交版本庫）。
+# 全部設定由 env/.env.console 提供。
 # 本機：http://127.0.0.1:5000（容器內仍為 :4000）
 services:
   console:
     build:
       context: .
       dockerfile: apps/console_backend/Dockerfile
-    ports:
-      - "5000:4000"
+    network_mode: host
     env_file:
-      - path: .env.console
+      - path: env/.env.console
         required: false
-      - path: .env
-        required: false
-    environment:
-      VBS_CONSOLE_HTTP_BIND: ":4000"
-      # VBS_CF_ACCESS_JWKS_URL: "https://<team-domain>/cdn-cgi/access/certs"
-      VBS_CF_JWKS_CACHE_TTL_SEC: "3600"
-      VBS_CONSOLE_NODE_OFFLINE_TTL_SEC: "10"
-      VBS_NODE_CN_PREFIX: "vbs-node-"
-      VBS_CONSOLE_JWT_ISSUER: "vbs-console"
-      VBS_GUEST_TOKEN_TTL_SEC: "600"
-      VBS_GUEST_DB_PATH: "data/console-guests.db"

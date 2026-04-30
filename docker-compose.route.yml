@@ -1,4 +1,4 @@
-# 請直接使用 env/.env.route 覆寫到 .env.route 後再啟動（勿提交版本庫）。
+# Route 全部設定由 env/.env.route 提供（勿在此寫死）。
 services:
   vbs-route:
     build:
@@ -6,33 +6,5 @@ services:
       dockerfile: apps/route/Dockerfile
     network_mode: host
     env_file:
-      - path: .env.route
+      - path: env/.env.route
         required: false
-    environment:
-      - VBS_NODE_ID=vbs-route-01
-      - VBS_LOG_LEVEL=info
-      - VBS_METRICS_INTERVAL=1000ms
-      - VBS_ROUTE_TELEMETRY_WS_PATH=/vbs/telemetry/ws
-      # 建議擇一設定：Team Domain 或 JWKS URL
-      # - VBS_CF_ACCESS_JWKS_URL=https://<team-domain>/cdn-cgi/access/certs
-      - VBS_CF_JWKS_CACHE_TTL_SEC=3600
-      - VBS_NODE_CN_PREFIX=vbs-node-
-      - VBS_CONSOLE_JWT_ISSUER=vbs-console
-      - VBS_ROUTE_SRTLA_INGEST_PORT=20020
-      - VBS_ROUTE_SRT_OUTPUT_PORT=20030
-      # PGM Relay StreamID 路由（預設 publish/read）
-      - VBS_ROUTE_PGM_STREAMID_PUBLISH_PREFIX=publish
-      - VBS_ROUTE_PGM_STREAMID_READ_PREFIX=read
-      # Console 產生播放 URL 用（若未設定，將 fallback request host）
-      # - VBS_ROUTE_PGM_PUBLIC_HOST=live.example.com
-      # - VBS_ROUTE_PGM_PUBLIC_PORT=20030
-      # - VBS_ROUTE_PGM_READ_LATENCY_MS=200
-      - VBS_ROUTE_INTERNAL_SRT_PORT=20021
-      - VBS_ROUTE_LOSS_MAX_TTL=40
-      - VBS_ROUTE_SRT_LATENCY_MS=2000
-      - VBS_ROUTE_INGEST_IFACE=eth0
-      # 預設啟動控制面；若要關閉請設 VBS_ROUTE_CONTROL_BIND=
-      - VBS_ROUTE_CONTROL_BIND=:20080
-      # 選用：行動網路 MTU（需映像內有 ip 指令，已於 Dockerfile 安裝 iproute2）
-      # - VBS_ROUTE_MTU_IFACE=eth0
-      # - VBS_ROUTE_MTU=1400

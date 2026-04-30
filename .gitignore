@@ -24,8 +24,8 @@ apps/engine/dist
 .env.*
 !.env.*.example
 推版規則.md
+apps/console_frontend/.vite
 apps/console_frontend/.vscode
-apps/console_frontend/.vite-env.d.ts
 apps/console_frontend/frontend_Revise.md
 apps/engine/EyevinnReadme
 gitpush rules.md
