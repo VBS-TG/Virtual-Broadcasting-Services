@@ -119,7 +119,6 @@ export interface OperationLogEntry {
 
 // ── App Settings ──────────────────────────────────────────────────────────────
 export interface AppSettings {
-  apiBaseUrl: string
   refreshInterval: number
   theme: 'dark' | 'light'
   apiTimeoutMs: number

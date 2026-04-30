@@ -70,20 +70,10 @@ function normalizeApiError(payload: any, status: number): string {
   }
 }
 
-function resolvePublicApiBase(): string {
-  const raw = String(import.meta.env.VITE_API_BASE_URL ?? '').trim()
-  if (!raw) return 'https://vbsapi.cyblisswisdom.org'
-  return raw.replace(/\/+$/, '')
-}
-
-function resolveApiBase(rawBase: string): string {
-  const trimmed = rawBase.trim()
-  if (!trimmed) return resolvePublicApiBase()
-  return trimmed.replace(/\/+$/, '')
-}
-
-function resolveRequestURL(apiBase: string, path: string): string {
-  return `${apiBase}${path}`
+function resolveRequestURL(path: string): string {
+  const p = String(path ?? '').trim()
+  if (!p) return '/api/v1/healthz'
+  return p.startsWith('/') ? p : `/${p}`
 }
 
 export async function request<T>(
@@ -92,11 +82,10 @@ export async function request<T>(
   body?: unknown
 ): Promise<ApiResponse<T>> {
   const settings = useSettingsStore.getState().settings
-  const apiBase = resolveApiBase(settings.apiBaseUrl)
   const start = performance.now()
 
   try {
-    const firstURL = resolveRequestURL(apiBase, path)
+    const firstURL = resolveRequestURL(path)
     const first = await performFetch(method, firstURL, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
     const latencyMs = Math.round(performance.now() - start)
     if (first.status === 401) {
@@ -166,8 +155,7 @@ async function tryRefreshAdminToken(timeoutMs: number): Promise<boolean> {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const apiBase = resolveApiBase(useSettingsStore.getState().settings.apiBaseUrl)
-      const res = await fetch(`${apiBase}/api/v1/auth/admin/email-login`, {
+      const res = await fetch('/api/v1/auth/admin/email-login', {
         method: 'POST',
         signal: controller.signal,
         credentials: 'include',

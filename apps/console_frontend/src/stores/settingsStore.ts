@@ -3,8 +3,6 @@ import { persist } from 'zustand/middleware'
 import type { AppSettings } from '../types'
 
 const DEFAULT: AppSettings = {
-  // 統一 API 入口：vbsapi.cyblisswisdom.org
-  apiBaseUrl: 'https://vbsapi.cyblisswisdom.org',
   refreshInterval: 1000,
   theme: 'dark',
   apiTimeoutMs: 10000,
