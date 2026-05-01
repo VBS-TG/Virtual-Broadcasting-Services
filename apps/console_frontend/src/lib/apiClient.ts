@@ -147,8 +147,7 @@ async function performFetch(
     }
     if (token) {
       const bearer = `Bearer ${token}`
-      // Human JWT is sent through app-specific header only.
-      // This avoids Cloudflare Access interference on Authorization header.
+      // Human JWT transport channel (strict separation from CF auth path).
       headers['X-VBS-Authorization'] = bearer
     }
     const res = await fetch(url, {
