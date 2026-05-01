@@ -25,6 +25,7 @@ apps/engine/dist
 !.env.*.example
 推版規則.md
 apps/console_frontend/.vite
+apps/console_frontend/.wrangler
 apps/console_frontend/.vscode
 apps/console_frontend/frontend_Revise.md
 apps/engine/EyevinnReadme
