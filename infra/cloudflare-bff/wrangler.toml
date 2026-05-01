@@ -1,10 +1,13 @@
 name = "vbs-bff-proxy"
 main = "worker.js"
-compatibility_date = "2026-05-01"
+compatibility_date = "2026-04-30"
+workers_dev = false
+preview_urls = false
 
 [vars]
 API_ORIGIN = "https://vbsapi.cyblisswisdom.org"
 RTC_ORIGIN = "https://vbsrtc.cyblisswisdom.org"
+ALLOWED_ORIGIN = "https://vbs.cyblisswisdom.org"
 
 # Set routes after first deploy (adjust zone/route as needed), e.g.:
 # routes = [

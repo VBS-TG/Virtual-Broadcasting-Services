@@ -1,52 +1,58 @@
-# Cloudflare BFF Proxy (Permanent Fix)
+# Cloudflare BFF Proxy (Production)
 
 This worker provides same-origin proxy endpoints for the frontend:
 
 - `/api/*` -> `https://vbsapi.cyblisswisdom.org/*`
 - `/whep/*` -> `https://vbsrtc.cyblisswisdom.org/*`
 
-It injects Cloudflare Access service-token headers server-side, so browser XHR no longer gets redirected to Access interactive pages.
+## Security and behavior
 
-## 1) Prerequisites
+- Keeps user `Authorization: Bearer ...` header intact
+- Adds `Cf-Access-Client-Id/Secret` for upstream M2M access
+- Uses `redirect: "manual"` and converts upstream `30x` auth challenge to `401` JSON
+- Handles `OPTIONS` preflight and appends CORS headers
+- Restricts browser origin via `ALLOWED_ORIGIN`
 
-- Install Wrangler and login:
+## Files
 
-```bash
-npm i -g wrangler
-wrangler login
-```
+- `worker.js` - Worker logic
+- `wrangler.toml` - Worker config and vars
 
-## 2) Configure secrets
+## Required secrets
 
-Run in this folder (`infra/cloudflare-bff`):
+Run in this folder:
 
 ```bash
 wrangler secret put CF_ACCESS_CLIENT_ID
 wrangler secret put CF_ACCESS_CLIENT_SECRET
 ```
 
-Use the BFF service token pair (recommended dedicated token for this worker).
+Use the **BFF** service token pair.
 
-## 3) Deploy worker
+## Deploy
 
 ```bash
 wrangler deploy
 ```
 
-## 4) Bind routes
+## Routes
 
-Add these routes in Worker settings (or in `wrangler.toml`):
+Bind routes in Cloudflare Worker:
 
 - `vbs.cyblisswisdom.org/api/*`
 - `vbs.cyblisswisdom.org/whep/*`
 
-## 5) Important frontend note
+## Origin allow list
 
-- Keep frontend API calls as same-origin (`/api/...`)
-- Do not set `VITE_API_BASE_URL` in production
-- `_redirects` should **not** forward `/api/*` to external origin
+`wrangler.toml` currently uses:
 
-## 6) Verify
+```toml
+ALLOWED_ORIGIN = "https://vbs.cyblisswisdom.org"
+```
+
+If frontend domain changes, update this value and redeploy.
+
+## Verify
 
 ```bash
 curl -i -X POST "https://vbs.cyblisswisdom.org/api/v1/auth/admin/email-login" \
@@ -54,4 +60,4 @@ curl -i -X POST "https://vbs.cyblisswisdom.org/api/v1/auth/admin/email-login" \
   --data '{"email":"vbs.engine.tg@gmail.com"}'
 ```
 
-Expected: no more 302 to `/cdn-cgi/access/authorized`, no CORS redirect errors in browser.
+Expected: no more browser-side Access redirect/CORS loops.
