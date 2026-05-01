@@ -52,6 +52,22 @@ interface PresenceRecord {
 
 let adminRefreshInFlight: Promise<boolean> | null = null
 
+function getAuthToken(): string {
+  const fromStore = String(useAuthStore.getState().user?.token ?? '').trim()
+  if (fromStore) return fromStore
+  if (typeof window === 'undefined') return ''
+
+  try {
+    const raw = window.localStorage.getItem('vbs-auth')
+    if (!raw) return ''
+    const parsed = JSON.parse(raw)
+    const token = String(parsed?.state?.user?.token ?? '').trim()
+    return token
+  } catch {
+    return ''
+  }
+}
+
 function normalizeApiError(payload: any, status: number): string {
   const code = String(payload?.code ?? '').trim()
   const raw = String(payload?.error ?? payload?.message ?? '').trim()
@@ -86,12 +102,12 @@ export async function request<T>(
 
   try {
     const firstURL = resolveRequestURL(path)
-    const first = await performFetch(method, firstURL, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
+    const first = await performFetch(method, firstURL, body, settings.apiTimeoutMs, getAuthToken())
     const latencyMs = Math.round(performance.now() - start)
     if (first.status === 401) {
       const refreshed = await tryRefreshAdminToken(settings.apiTimeoutMs)
       if (refreshed) {
-        const second = await performFetch(method, firstURL, body, settings.apiTimeoutMs, useAuthStore.getState().user?.token ?? '')
+        const second = await performFetch(method, firstURL, body, settings.apiTimeoutMs, getAuthToken())
         if (!second.ok) {
           return {
             error: normalizeApiError(second.data, second.status),

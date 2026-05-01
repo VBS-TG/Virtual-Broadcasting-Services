@@ -140,13 +140,16 @@ func (v *AccessJWTVerifier) VerifyRequest(r *http.Request) (*AccessClaims, error
 // This is used by Console control/admin authorization to avoid Cloudflare
 // service-token identity overshadowing a valid admin/guest bearer token.
 func (v *AccessJWTVerifier) VerifyRequestPreferBearer(r *http.Request) (*AccessClaims, error) {
-	if claims, err := v.VerifyBearer(r.Header.Get("Authorization")); err == nil {
-		return claims, nil
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authz != "" {
+		// If caller provides Authorization header, treat bearer token as the single
+		// source of truth for role. Do not silently fall back to Cloudflare identity.
+		return v.VerifyBearer(authz)
 	}
 	if cfJWT := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion")); cfJWT != "" {
 		return v.VerifyToken(cfJWT)
 	}
-	return v.VerifyBearer(r.Header.Get("Authorization"))
+	return nil, fmt.Errorf("missing authorization")
 }
 
 func (v *AccessJWTVerifier) VerifyBearer(header string) (*AccessClaims, error) {
