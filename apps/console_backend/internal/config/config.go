@@ -67,7 +67,11 @@ func Load() (*Config, error) {
 	}
 	aud := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_AUD"))
 	if aud == "" {
-		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD is required")
+		// Backward-compatible alias.
+		aud = strings.TrimSpace(os.Getenv("VBS_CF_AUD"))
+	}
+	if aud == "" {
+		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD (or VBS_CF_AUD) is required")
 	}
 	teamDomain := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_TEAM_DOMAIN"))
 	jwksURL := strings.TrimSpace(os.Getenv("VBS_CF_ACCESS_JWKS_URL"))

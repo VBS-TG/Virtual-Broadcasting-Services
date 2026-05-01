@@ -66,7 +66,7 @@ type accessJWTClaims struct {
 
 func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duration, clockSkewLeeway time.Duration, adminEmails []string, nodeCNPrefix, routeClientID, engineClientID, captureClientID, bffClientID, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
 	if strings.TrimSpace(aud) == "" {
-		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD is required")
+		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD (or VBS_CF_AUD) is required")
 	}
 	cfIssuer, resolvedJWKSURL, err := resolveIssuerAndJWKS(teamDomain, jwksURL)
 	if err != nil {
@@ -140,27 +140,34 @@ func (v *AccessJWTVerifier) VerifyRequest(r *http.Request) (*AccessClaims, error
 // This is used by Console control/admin authorization to avoid Cloudflare
 // service-token identity overshadowing a valid admin/guest bearer token.
 func (v *AccessJWTVerifier) VerifyRequestPreferBearer(r *http.Request) (*AccessClaims, error) {
-	authz := getHumanBearerHeader(r)
-	if authz != "" {
-		// Human control-plane identity source:
-		// use only app-specific header and do not mix with Cloudflare auth headers.
-		return v.VerifyBearer(authz)
+	if r == nil {
+		return nil, fmt.Errorf("missing request")
+	}
+	// Human control-plane identity source (preferred).
+	// Fail fast: if provided, it must verify successfully and must not fall back.
+	if xAuthz := strings.TrimSpace(r.Header.Get("X-VBS-Authorization")); xAuthz != "" {
+		claims, err := v.VerifyBearer(xAuthz)
+		if err != nil {
+			return nil, fmt.Errorf("x-vbs-authorization invalid: %w", err)
+		}
+		return claims, nil
+	}
+	// Legacy compatibility channel. Also fail fast when explicitly provided.
+	if authz := strings.TrimSpace(r.Header.Get("Authorization")); authz != "" {
+		claims, err := v.VerifyBearer(authz)
+		if err != nil {
+			return nil, fmt.Errorf("authorization invalid: %w", err)
+		}
+		return claims, nil
 	}
 	if cfJWT := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion")); cfJWT != "" {
-		return v.VerifyToken(cfJWT)
+		claims, err := v.VerifyToken(cfJWT)
+		if err != nil {
+			return nil, fmt.Errorf("cf-access token invalid: %w", err)
+		}
+		return claims, nil
 	}
 	return nil, fmt.Errorf("missing authorization")
-}
-
-func getHumanBearerHeader(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	// Human JWT transport channel.
-	if v := strings.TrimSpace(r.Header.Get("X-VBS-Authorization")); v != "" {
-		return v
-	}
-	return ""
 }
 
 func (v *AccessJWTVerifier) VerifyBearer(header string) (*AccessClaims, error) {
@@ -172,7 +179,25 @@ func (v *AccessJWTVerifier) VerifyBearer(header string) (*AccessClaims, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("empty bearer token")
 	}
-	return v.VerifyToken(raw)
+	claims, err := v.VerifyToken(raw)
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		switch {
+		case strings.Contains(msg, "expired"):
+			return nil, fmt.Errorf("token expired")
+		case strings.Contains(msg, "not valid yet"), strings.Contains(msg, "used before issued"):
+			return nil, fmt.Errorf("token not active yet")
+		case strings.Contains(msg, "issuer"):
+			return nil, fmt.Errorf("token issuer mismatch")
+		case strings.Contains(msg, "audience"):
+			return nil, fmt.Errorf("token audience mismatch")
+		case strings.Contains(msg, "signature"), strings.Contains(msg, "verify"):
+			return nil, fmt.Errorf("token signature invalid")
+		default:
+			return nil, fmt.Errorf("token invalid: %w", err)
+		}
+	}
+	return claims, nil
 }
 
 func (v *AccessJWTVerifier) VerifyToken(raw string) (*AccessClaims, error) {

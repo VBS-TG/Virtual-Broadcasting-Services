@@ -173,7 +173,11 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 			return
 		}
 		if err := s.authorizeServiceRequest(r); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, trimErr(err)), http.StatusForbidden)
+			status := http.StatusForbidden
+			if strings.HasPrefix(strings.ToLower(err.Error()), "unauthorized:") {
+				status = http.StatusUnauthorized
+			}
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, trimErr(err)), status)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -188,10 +192,15 @@ func (s *Server) authorizeServiceRequest(r *http.Request) error {
 	authzPreview := headerPreview(r.Header.Get("Authorization"), 20)
 	xVBSAuthzPreview := headerPreview(r.Header.Get("X-VBS-Authorization"), 20)
 	cfJWTPreview := headerPreview(r.Header.Get("Cf-Access-Jwt-Assertion"), 20)
+	hasHumanAuthHeader := strings.TrimSpace(r.Header.Get("X-VBS-Authorization")) != "" || strings.TrimSpace(r.Header.Get("Authorization")) != ""
 	claims, err := s.access.VerifyRequestPreferBearer(r)
 	if err != nil {
 		log.Printf("[auth-debug][middleware] authz=%q x_vbs_authz=%q cf_jwt=%q role=<verify_error> err=%v", authzPreview, xVBSAuthzPreview, cfJWTPreview, err)
-		// Keep legacy handler-level behavior for human/admin flows without preflight auth.
+		if hasHumanAuthHeader {
+			// Fail fast: explicit human token must verify or return 401.
+			return fmt.Errorf("unauthorized: %w", err)
+		}
+		// Preserve legacy behavior for completely unauthenticated paths.
 		return nil
 	}
 	role := strings.TrimSpace(strings.ToLower(claims.Role))
