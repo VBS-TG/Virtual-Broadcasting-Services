@@ -146,7 +146,8 @@ func (v *AccessJWTVerifier) VerifyRequestPreferBearer(r *http.Request) (*AccessC
 	// Human control-plane identity source (preferred).
 	// Fail fast: if provided, it must verify successfully and must not fall back.
 	if xAuthz := strings.TrimSpace(r.Header.Get("X-VBS-Authorization")); xAuthz != "" {
-		claims, err := v.VerifyBearer(xAuthz)
+		// X-VBS-Authorization carries a raw token, no "Bearer " prefix required.
+		claims, err := v.VerifyToken(xAuthz)
 		if err != nil {
 			return nil, fmt.Errorf("x-vbs-authorization invalid: %w", err)
 		}

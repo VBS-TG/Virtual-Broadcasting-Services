@@ -185,7 +185,8 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 }
 
 func (s *Server) authorizeServiceRequest(r *http.Request) error {
-	path := strings.TrimSpace(r.URL.Path)
+	path := auth.NormalizeRBACPath(r.URL.Path)
+	method := strings.TrimSpace(strings.ToUpper(r.Method))
 	if path == "/healthz" || path == "/api/v1/auth/admin/email-login" || path == "/api/v1/guest/exchange-pin" {
 		return nil
 	}
@@ -205,19 +206,30 @@ func (s *Server) authorizeServiceRequest(r *http.Request) error {
 	}
 	role := strings.TrimSpace(strings.ToLower(claims.Role))
 	log.Printf("[auth-debug][middleware] authz=%q x_vbs_authz=%q cf_jwt=%q role=%q", authzPreview, xVBSAuthzPreview, cfJWTPreview, role)
-	if role == "" || role == "admin" || role == "guest" {
+	if role == "guest" {
 		return nil
 	}
-	if s.servicePathAllowed(role, r.Method, path) {
+	if role == "admin" {
+		if auth.AdminMiddlewareAllowed(method, path) {
+			return nil
+		}
+		log.Printf("[auth-debug] Access Denied: Role=%s, Method=%s, Path=%s", role, method, path)
+		return fmt.Errorf("forbidden: role %s cannot access %s %s", role, method, path)
+	}
+	if role == "" {
 		return nil
 	}
-	return fmt.Errorf("forbidden: role %s cannot access %s %s", role, r.Method, path)
+	if s.servicePathAllowed(role, method, path) {
+		return nil
+	}
+	log.Printf("[auth-debug] Access Denied: Role=%s, Method=%s, Path=%s", role, method, path)
+	return fmt.Errorf("forbidden: role %s cannot access %s %s", role, method, path)
 }
 
 func (s *Server) servicePathAllowed(role, method, path string) bool {
 	role = strings.TrimSpace(strings.ToLower(role))
 	method = strings.TrimSpace(strings.ToUpper(method))
-	path = strings.TrimSpace(path)
+	path = auth.NormalizeRBACPath(path)
 	for _, rule := range serviceACLRules {
 		if !rule.matchesRole(role) {
 			continue
@@ -257,13 +269,14 @@ func (r serviceACLRule) matchesMethod(method string) bool {
 }
 
 func (r serviceACLRule) matchesPath(path string) bool {
+	path = auth.NormalizeRBACPath(path)
 	for _, exact := range r.exacts {
-		if path == exact {
+		if path == auth.NormalizeRBACPath(exact) {
 			return true
 		}
 	}
 	for _, prefix := range r.prefixes {
-		if strings.HasPrefix(path, prefix) {
+		if strings.HasPrefix(path, auth.NormalizeRBACPath(prefix)) {
 			return true
 		}
 	}
