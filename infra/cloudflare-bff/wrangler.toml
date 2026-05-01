@@ -7,10 +7,19 @@ preview_urls = false
 [vars]
 API_ORIGIN = "https://vbsapi.cyblisswisdom.org"
 RTC_ORIGIN = "https://vbsrtc.cyblisswisdom.org"
+# Optional path-routed upstreams on same domain gateway:
+# - /engine/* -> ENGINE_ORIGIN/*
+# - /route/*  -> ROUTE_ORIGIN/*
+ENGINE_ORIGIN = "https://vbsrtc.cyblisswisdom.org"
+# NOTE: set this to a reachable Route control origin before enabling /route*.
+# Example: ROUTE_ORIGIN = "http://<route-public-ip-or-dns>:20080"
+ROUTE_ORIGIN = "http://43.213.145.78:20080"
 ALLOWED_ORIGIN = "https://vbs.cyblisswisdom.org"
 
 # Set routes after first deploy (adjust zone/route as needed), e.g.:
 # routes = [
 #   { pattern = "vbs.cyblisswisdom.org/api/*", zone_name = "cyblisswisdom.org" },
-#   { pattern = "vbs.cyblisswisdom.org/whep/*", zone_name = "cyblisswisdom.org" }
+#   { pattern = "vbs.cyblisswisdom.org/whep/*", zone_name = "cyblisswisdom.org" },
+#   { pattern = "vbsapi.cyblisswisdom.org/engine*", zone_name = "cyblisswisdom.org" },
+#   { pattern = "vbsapi.cyblisswisdom.org/route*", zone_name = "cyblisswisdom.org" }
 # ]

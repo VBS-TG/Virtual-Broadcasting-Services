@@ -2,8 +2,10 @@
  * VBS same-origin BFF proxy for Cloudflare.
  *
  * Routes:
- * - /api/*  -> https://vbsapi.cyblisswisdom.org/*
- * - /whep/* -> https://vbsrtc.cyblisswisdom.org/*
+ * - /api/*    -> API_ORIGIN/*
+ * - /whep/*   -> RTC_ORIGIN/*
+ * - /engine/* -> ENGINE_ORIGIN/* (strips /engine prefix)
+ * - /route/*  -> ROUTE_ORIGIN/*  (strips /route prefix)
  */
 export default {
   async fetch(request, env) {
@@ -16,32 +18,80 @@ export default {
     }
 
     if (path.startsWith("/api/")) {
-      return proxyToUpstream(request, env, env.API_ORIGIN, origin);
+      return proxyToUpstream(request, env, {
+        upstreamOrigin: env.API_ORIGIN,
+        requestOrigin: origin,
+        stripPrefix: "",
+        serviceClientID: env.API_CF_ACCESS_CLIENT_ID || env.CF_ACCESS_CLIENT_ID || "",
+        serviceClientSecret: env.API_CF_ACCESS_CLIENT_SECRET || env.CF_ACCESS_CLIENT_SECRET || "",
+      });
     }
 
     if (path.startsWith("/whep/")) {
-      return proxyToUpstream(request, env, env.RTC_ORIGIN, origin);
+      return proxyToUpstream(request, env, {
+        upstreamOrigin: env.RTC_ORIGIN,
+        requestOrigin: origin,
+        stripPrefix: "",
+        serviceClientID: env.RTC_CF_ACCESS_CLIENT_ID || env.CF_ACCESS_CLIENT_ID || "",
+        serviceClientSecret: env.RTC_CF_ACCESS_CLIENT_SECRET || env.CF_ACCESS_CLIENT_SECRET || "",
+      });
+    }
+
+    if (path === "/engine" || path.startsWith("/engine/")) {
+      return proxyToUpstream(request, env, {
+        upstreamOrigin: env.ENGINE_ORIGIN,
+        requestOrigin: origin,
+        stripPrefix: "/engine",
+        serviceClientID: env.ENGINE_CF_ACCESS_CLIENT_ID || "",
+        serviceClientSecret: env.ENGINE_CF_ACCESS_CLIENT_SECRET || "",
+      });
+    }
+
+    if (path === "/route" || path.startsWith("/route/")) {
+      return proxyToUpstream(request, env, {
+        upstreamOrigin: env.ROUTE_ORIGIN,
+        requestOrigin: origin,
+        stripPrefix: "/route",
+        serviceClientID: env.ROUTE_CF_ACCESS_CLIENT_ID || "",
+        serviceClientSecret: env.ROUTE_CF_ACCESS_CLIENT_SECRET || "",
+      });
     }
 
     return withCORS(new Response("Not Found", { status: 404 }), env, origin);
   },
 };
 
-async function proxyToUpstream(request, env, upstreamOrigin, requestOrigin) {
+async function proxyToUpstream(request, env, opts) {
+  const upstreamOrigin = String(opts?.upstreamOrigin || "").trim();
+  const requestOrigin = String(opts?.requestOrigin || "");
+  const stripPrefix = String(opts?.stripPrefix || "");
+  const serviceClientID = String(opts?.serviceClientID || "").trim();
+  const serviceClientSecret = String(opts?.serviceClientSecret || "").trim();
   if (!upstreamOrigin) {
     return withCORS(jsonError(500, "missing upstream origin"), env, requestOrigin);
   }
 
   const incomingUrl = new URL(request.url);
-  const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, upstreamOrigin);
+  let upstreamPath = incomingUrl.pathname;
+  if (stripPrefix && upstreamPath.startsWith(stripPrefix)) {
+    upstreamPath = upstreamPath.slice(stripPrefix.length);
+    if (!upstreamPath.startsWith("/")) upstreamPath = "/" + upstreamPath;
+  }
+  const upstreamUrl = new URL(upstreamPath + incomingUrl.search, upstreamOrigin);
 
   const headers = new Headers(request.headers);
   headers.delete("host");
   // Strict separation: human JWT uses X-VBS-Authorization only.
   // Do not forward generic Authorization to avoid auth-source mixing.
   headers.delete("authorization");
-  headers.set("cf-access-client-id", env.CF_ACCESS_CLIENT_ID || "");
-  headers.set("cf-access-client-secret", env.CF_ACCESS_CLIENT_SECRET || "");
+  // Preserve caller-provided service token (e.g. console_backend -> /engine/*).
+  // Only inject when upstream token is configured and incoming header is absent.
+  if (serviceClientID && !headers.get("cf-access-client-id")) {
+    headers.set("cf-access-client-id", serviceClientID);
+  }
+  if (serviceClientSecret && !headers.get("cf-access-client-secret")) {
+    headers.set("cf-access-client-secret", serviceClientSecret);
+  }
   headers.set("x-forwarded-host", incomingUrl.host);
   headers.set("x-forwarded-proto", incomingUrl.protocol.replace(":", ""));
 
