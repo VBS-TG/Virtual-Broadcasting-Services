@@ -92,6 +92,11 @@ function resolveRequestURL(path: string): string {
   return p.startsWith('/') ? p : `/${p}`
 }
 
+function isPublicPath(path: string): boolean {
+  const p = resolveRequestURL(path)
+  return p === '/api/v1/auth/admin/email-login' || p === '/api/v1/guest/exchange-pin' || p === '/api/v1/healthz'
+}
+
 export async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
@@ -99,10 +104,20 @@ export async function request<T>(
 ): Promise<ApiResponse<T>> {
   const settings = useSettingsStore.getState().settings
   const start = performance.now()
+  const firstURL = resolveRequestURL(path)
+  const token = getAuthToken()
+
+  // Fail fast on protected endpoints to avoid unauthenticated fallback identity.
+  if (!isPublicPath(firstURL) && !token) {
+    return {
+      error: 'missing auth token',
+      statusCode: 401,
+      latencyMs: Math.round(performance.now() - start),
+    }
+  }
 
   try {
-    const firstURL = resolveRequestURL(path)
-    const first = await performFetch(method, firstURL, body, settings.apiTimeoutMs, getAuthToken())
+    const first = await performFetch(method, firstURL, body, settings.apiTimeoutMs, token)
     const latencyMs = Math.round(performance.now() - start)
     if (first.status === 401) {
       const refreshed = await tryRefreshAdminToken(settings.apiTimeoutMs)
@@ -146,9 +161,8 @@ async function performFetch(
       'Content-Type': 'application/json',
     }
     if (token) {
-      const bearer = `Bearer ${token}`
-      // Human JWT transport channel (strict separation from CF auth path).
-      headers['X-VBS-Authorization'] = bearer
+      // X-VBS-Authorization carries raw JWT (no Bearer prefix).
+      headers['X-VBS-Authorization'] = token
     }
     const res = await fetch(url, {
       method,
