@@ -1394,7 +1394,7 @@ func (s *Server) handleGuestExchangePIN(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGuestIntrospect(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.access.VerifyRequest(r)
+	claims, err := s.access.VerifyRequestPreferBearer(r)
 	if err != nil {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
