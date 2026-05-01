@@ -1130,6 +1130,17 @@ func (s *Server) handleCaptureReboot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
+	authzPreview := headerPreview(r.Header.Get("Authorization"), 20)
+	cfJWTPreview := headerPreview(r.Header.Get("Cf-Access-Jwt-Assertion"), 20)
+	claims, err := s.access.VerifyRequestPreferBearer(r)
+	finalRole := ""
+	if err != nil {
+		log.Printf("[auth-debug][switch-state] authz=%q cf_jwt=%q role=<verify_error> err=%v", authzPreview, cfJWTPreview, err)
+	} else {
+		finalRole = strings.TrimSpace(strings.ToLower(claims.Role))
+		log.Printf("[auth-debug][switch-state] authz=%q cf_jwt=%q role=%q", authzPreview, cfJWTPreview, finalRole)
+	}
+
 	if !s.controlAuthorized(r) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
@@ -1162,6 +1173,18 @@ func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(raw)
+}
+
+func headerPreview(raw string, n int) string {
+	v := strings.TrimSpace(raw)
+	if v == "" || n <= 0 {
+		return ""
+	}
+	runes := []rune(v)
+	if len(runes) <= n {
+		return v
+	}
+	return string(runes[:n])
 }
 
 func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path string) {
