@@ -37,6 +37,9 @@ async function proxyToUpstream(request, env, upstreamOrigin, requestOrigin) {
 
   const headers = new Headers(request.headers);
   headers.delete("host");
+  // Strict separation: human JWT uses X-VBS-Authorization only.
+  // Do not forward generic Authorization to avoid auth-source mixing.
+  headers.delete("authorization");
   headers.set("cf-access-client-id", env.CF_ACCESS_CLIENT_ID || "");
   headers.set("cf-access-client-secret", env.CF_ACCESS_CLIENT_SECRET || "");
   headers.set("x-forwarded-host", incomingUrl.host);
@@ -91,7 +94,7 @@ function handlePreflight(request, env, requestOrigin) {
   const headers = new Headers();
   headers.set("access-control-allow-origin", allowedOrigin);
   headers.set("access-control-allow-methods", reqMethod || "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  headers.set("access-control-allow-headers", reqHeaders || "authorization,content-type");
+  headers.set("access-control-allow-headers", reqHeaders || "x-vbs-authorization,content-type");
   headers.set("access-control-allow-credentials", "true");
   headers.set("access-control-max-age", "86400");
   headers.set("vary", "Origin");
