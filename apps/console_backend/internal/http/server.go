@@ -185,12 +185,16 @@ func (s *Server) authorizeServiceRequest(r *http.Request) error {
 	if path == "/healthz" || path == "/api/v1/auth/admin/email-login" || path == "/api/v1/guest/exchange-pin" {
 		return nil
 	}
+	authzPreview := headerPreview(r.Header.Get("Authorization"), 20)
+	cfJWTPreview := headerPreview(r.Header.Get("Cf-Access-Jwt-Assertion"), 20)
 	claims, err := s.access.VerifyRequestPreferBearer(r)
 	if err != nil {
+		log.Printf("[auth-debug][middleware] authz=%q cf_jwt=%q role=<verify_error> err=%v", authzPreview, cfJWTPreview, err)
 		// Keep legacy handler-level behavior for human/admin flows without preflight auth.
 		return nil
 	}
 	role := strings.TrimSpace(strings.ToLower(claims.Role))
+	log.Printf("[auth-debug][middleware] authz=%q cf_jwt=%q role=%q", authzPreview, cfJWTPreview, role)
 	if role == "" || role == "admin" || role == "guest" {
 		return nil
 	}
