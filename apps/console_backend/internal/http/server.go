@@ -164,7 +164,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		if origin != "" && s.isAllowedOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Allow-Headers", "X-VBS-Authorization, Content-Type")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Add("Vary", "Origin")
 		}
@@ -186,15 +186,16 @@ func (s *Server) authorizeServiceRequest(r *http.Request) error {
 		return nil
 	}
 	authzPreview := headerPreview(r.Header.Get("Authorization"), 20)
+	xVBSAuthzPreview := headerPreview(r.Header.Get("X-VBS-Authorization"), 20)
 	cfJWTPreview := headerPreview(r.Header.Get("Cf-Access-Jwt-Assertion"), 20)
 	claims, err := s.access.VerifyRequestPreferBearer(r)
 	if err != nil {
-		log.Printf("[auth-debug][middleware] authz=%q cf_jwt=%q role=<verify_error> err=%v", authzPreview, cfJWTPreview, err)
+		log.Printf("[auth-debug][middleware] authz=%q x_vbs_authz=%q cf_jwt=%q role=<verify_error> err=%v", authzPreview, xVBSAuthzPreview, cfJWTPreview, err)
 		// Keep legacy handler-level behavior for human/admin flows without preflight auth.
 		return nil
 	}
 	role := strings.TrimSpace(strings.ToLower(claims.Role))
-	log.Printf("[auth-debug][middleware] authz=%q cf_jwt=%q role=%q", authzPreview, cfJWTPreview, role)
+	log.Printf("[auth-debug][middleware] authz=%q x_vbs_authz=%q cf_jwt=%q role=%q", authzPreview, xVBSAuthzPreview, cfJWTPreview, role)
 	if role == "" || role == "admin" || role == "guest" {
 		return nil
 	}
@@ -1135,14 +1136,15 @@ func (s *Server) handleCaptureReboot(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
 	authzPreview := headerPreview(r.Header.Get("Authorization"), 20)
+	xVBSAuthzPreview := headerPreview(r.Header.Get("X-VBS-Authorization"), 20)
 	cfJWTPreview := headerPreview(r.Header.Get("Cf-Access-Jwt-Assertion"), 20)
 	claims, err := s.access.VerifyRequestPreferBearer(r)
 	finalRole := ""
 	if err != nil {
-		log.Printf("[auth-debug][switch-state] authz=%q cf_jwt=%q role=<verify_error> err=%v", authzPreview, cfJWTPreview, err)
+		log.Printf("[auth-debug][switch-state] authz=%q x_vbs_authz=%q cf_jwt=%q role=<verify_error> err=%v", authzPreview, xVBSAuthzPreview, cfJWTPreview, err)
 	} else {
 		finalRole = strings.TrimSpace(strings.ToLower(claims.Role))
-		log.Printf("[auth-debug][switch-state] authz=%q cf_jwt=%q role=%q", authzPreview, cfJWTPreview, finalRole)
+		log.Printf("[auth-debug][switch-state] authz=%q x_vbs_authz=%q cf_jwt=%q role=%q", authzPreview, xVBSAuthzPreview, cfJWTPreview, finalRole)
 	}
 
 	if !s.controlAuthorized(r) {

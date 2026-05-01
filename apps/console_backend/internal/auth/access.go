@@ -133,23 +133,34 @@ func (v *AccessJWTVerifier) VerifyRequest(r *http.Request) (*AccessClaims, error
 	if cfJWT := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion")); cfJWT != "" {
 		return v.VerifyToken(cfJWT)
 	}
-	return v.VerifyBearer(r.Header.Get("Authorization"))
+	return nil, fmt.Errorf("missing Cf-Access-Jwt-Assertion")
 }
 
 // VerifyRequestPreferBearer prioritizes application-layer bearer tokens.
 // This is used by Console control/admin authorization to avoid Cloudflare
 // service-token identity overshadowing a valid admin/guest bearer token.
 func (v *AccessJWTVerifier) VerifyRequestPreferBearer(r *http.Request) (*AccessClaims, error) {
-	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	authz := getHumanBearerHeader(r)
 	if authz != "" {
-		// If caller provides Authorization header, treat bearer token as the single
-		// source of truth for role. Do not silently fall back to Cloudflare identity.
+		// Human control-plane identity source:
+		// use only app-specific header and do not mix with Cloudflare auth headers.
 		return v.VerifyBearer(authz)
 	}
 	if cfJWT := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion")); cfJWT != "" {
 		return v.VerifyToken(cfJWT)
 	}
 	return nil, fmt.Errorf("missing authorization")
+}
+
+func getHumanBearerHeader(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	// Human JWT transport channel.
+	if v := strings.TrimSpace(r.Header.Get("X-VBS-Authorization")); v != "" {
+		return v
+	}
+	return ""
 }
 
 func (v *AccessJWTVerifier) VerifyBearer(header string) (*AccessClaims, error) {

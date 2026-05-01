@@ -145,7 +145,12 @@ async function performFetch(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
-    if (token) headers.Authorization = `Bearer ${token}`
+    if (token) {
+      const bearer = `Bearer ${token}`
+      // Human JWT is sent through app-specific header only.
+      // This avoids Cloudflare Access interference on Authorization header.
+      headers['X-VBS-Authorization'] = bearer
+    }
     const res = await fetch(url, {
       method,
       signal: controller.signal,
