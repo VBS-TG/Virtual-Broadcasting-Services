@@ -3,7 +3,7 @@ import { useTelemetryStore } from '../stores/telemetryStore'
 import TelemetryPanel from '../components/TelemetryPanel'
 import PageShell from '../components/PageShell'
 import { Activity, RefreshCw } from 'lucide-react'
-import { postCaptureBitrate, postCaptureReboot, postEnginePGMOutput, postEngineReset, postRouteBuffer } from '../lib/apiClient'
+import { getTelemetryIngestWebSocketUrl, postCaptureBitrate, postCaptureReboot, postEnginePGMOutput, postEngineReset, postRouteBuffer } from '../lib/apiClient'
 import { useOperationLogStore } from '../stores/operationLogStore'
 
 export default function Telemetry() {
@@ -22,6 +22,13 @@ export default function Telemetry() {
     const t = setInterval(fetch, refreshInterval)
     return () => clearInterval(t)
   }, [autoRefresh, refreshInterval, fetch])
+
+  useEffect(() => {
+    const url = getTelemetryIngestWebSocketUrl()
+    if (!url) return
+    const ws = new WebSocket(url)
+    return () => ws.close()
+  }, [])
 
   return (
     <PageShell

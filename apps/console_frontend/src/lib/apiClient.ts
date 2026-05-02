@@ -70,6 +70,21 @@ function getAuthToken(): string {
   return String(useAuthStore.getState().user?.token ?? '').trim()
 }
 
+/** Browser WebSocket to telemetry ingest: same token as `X-VBS-Authorization` (query `token` because WS cannot set custom headers). */
+export function getTelemetryIngestWebSocketUrl(): string | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  const token = getAuthToken()
+  if (!token) {
+    return null
+  }
+  const u = new URL('/vbs/telemetry/ws', window.location.origin)
+  u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:'
+  u.searchParams.set('token', token)
+  return u.toString()
+}
+
 function normalizeApiError(payload: any, status: number): string {
   const code = String(payload?.code ?? '').trim()
   const raw = String(payload?.error ?? payload?.message ?? '').trim()

@@ -28,6 +28,14 @@ export default {
       });
     }
 
+    if (path.startsWith("/vbs/")) {
+      return proxyToUpstream(request, env, {
+        upstreamOrigin: env.API_ORIGIN,
+        requestOrigin: origin,
+        stripPrefix: "",
+      });
+    }
+
     if (path.startsWith("/whep/")) {
       return proxyToUpstream(request, env, {
         upstreamOrigin: env.RTC_ORIGIN,

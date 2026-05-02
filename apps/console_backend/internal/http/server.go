@@ -637,7 +637,14 @@ func (s *Server) writeLatest(w http.ResponseWriter) {
 }
 
 func (s *Server) handleTelemetryWS(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.access.VerifyRequest(r)
+	tokenStr := strings.TrimSpace(r.URL.Query().Get("token"))
+	var claims *auth.AccessClaims
+	var err error
+	if tokenStr != "" {
+		claims, err = s.access.VerifyToken(tokenStr)
+	} else {
+		claims, err = s.access.VerifyRequest(r)
+	}
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
