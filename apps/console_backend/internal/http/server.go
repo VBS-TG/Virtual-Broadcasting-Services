@@ -428,8 +428,8 @@ func (s *Server) handleBFFProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if authz := strings.TrimSpace(r.Header.Get("Authorization")); authz != "" {
-		req.Header.Set("Authorization", authz)
+	if x := strings.TrimSpace(r.Header.Get("X-VBS-Authorization")); x != "" {
+		req.Header.Set("X-VBS-Authorization", x)
 	}
 	if accept := strings.TrimSpace(r.Header.Get("Accept")); accept != "" {
 		req.Header.Set("Accept", accept)
@@ -1852,7 +1852,6 @@ func (s *Server) engineControlGET(path string) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	log.Printf("[engine-debug] GET %s -> status=%d", path, resp.StatusCode)
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {

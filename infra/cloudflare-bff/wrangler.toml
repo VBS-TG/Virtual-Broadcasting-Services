@@ -1,3 +1,4 @@
+# BFF: path rewrite + CORS only. No Wrangler secrets required for Access token injection.
 name = "vbs-bff-proxy"
 main = "worker.js"
 compatibility_date = "2026-04-30"

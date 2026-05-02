@@ -163,7 +163,8 @@ async function performFetch(
       'Content-Type': 'application/json',
     }
     if (token) {
-      // X-VBS-Authorization carries raw JWT (no Bearer prefix).
+      // Application JWT only via X-VBS-Authorization (parsed.state.user.token in localStorage vbs-auth).
+      // Do not send Authorization: Bearer — BFF forwards headers as-is; console_backend validates X-VBS-Authorization.
       headers['X-VBS-Authorization'] = token
     }
     const res = await fetch(url, {

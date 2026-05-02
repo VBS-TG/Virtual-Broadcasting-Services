@@ -1,6 +1,6 @@
 # Console 部署與驗證（ZTA / Human-Machine Separation）
 
-本文件對齊發布版：Console 前台只走同源 API，Console 後端負責人機分離與節點編排。
+本文件對齊發布版：Console 前台只走同源 API（經 **BFF Worker 純轉發** 至 `vbsapi`），Console 後端負責應用層身分與節點編排；**Cloudflare Access** 負責網路層連線資格。
 
 ## 前置
 
@@ -32,10 +32,14 @@ curl -sS http://127.0.0.1:5000/healthz
 
 ## 3) 驗證管理端查詢（admin/guest JWT）
 
+瀏覽器／前台正式慣例為 **`X-VBS-Authorization: <raw JWT>`**（無 `Bearer`）。`curl` 驗證範例：
+
 ```bash
 curl -sS http://127.0.0.1:5000/api/v1/telemetry/latest \
-  -H "Authorization: Bearer <access-or-console-jwt>"
+  -H "X-VBS-Authorization: <console-or-cloudflare-jwt>"
 ```
+
+（後端仍相容 `Authorization: Bearer`，但請勿與前台規格混用。）
 
 成功時回傳每個節點最新遙測與 `presence` 狀態。
 
@@ -54,7 +58,7 @@ curl -sS http://127.0.0.1:5000/api/v1/telemetry/latest \
 
 ```bash
 wscat -c ws://127.0.0.1:5000/vbs/telemetry/events/ws \
-  -H "Authorization: Bearer <cloudflare-or-console-jwt>"
+  -H "X-VBS-Authorization: <console-or-cloudflare-jwt>"
 ```
 
 當節點超過 `VBS_CONSOLE_NODE_OFFLINE_TTL_SEC` 未更新遙測時，會收到 `node_offline`；恢復後收到 `node_online`。

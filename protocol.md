@@ -160,6 +160,12 @@ Engine 節點採 **Eyevinn Open Live 官方核心 + 本專案 Adapter**。
 
 Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 配置編排中心（Orchestrator）** 與 **節點最新狀態內存快照** 的最小服務；預設 HTTP `:4000`，本倉庫 `docker-compose.console.yml` 將主機埠映射為 **5000**（避免與本機 4000 衝突）；對外可經 Cloudflare Tunnel（見 `docs/deploy/cloudflared-api.example.yml`）。
 
+### Cloudflare BFF（`infra/cloudflare-bff`，Workers）
+
+- **僅轉發**：依路徑將 `/api/*`、`/whep/*`、`/engine/*`、`/route/*` 對應到 `API_ORIGIN`、`RTC_ORIGIN`、`ENGINE_ORIGIN`、`ROUTE_ORIGIN`；**不**在 Worker 內注入 `Cf-Access-Client-Id`／`Secret`，**不**依 `X-VBS-Authorization` 分支。
+- 請求標頭除 **`Host`**（須配合上游 URL）外 **原樣**轉發；`redirect: manual`，並對上游 `3xx` 做固定錯誤回應以免瀏覽器盲目跟隨。
+- **網路層**：Cloudflare Access／Tunnel 政策決定能否連到各 origin；**應用層**：瀏覽器 API 使用 **`X-VBS-Authorization`**（Console 簽發 JWT），由 **console_backend** 驗證。
+
 ### 環境變數（Console 行程）
 
 | 變數 | 必填 | 說明 |
