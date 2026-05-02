@@ -336,7 +336,7 @@ func (s *Server) captureControlPOST(path string, body []byte) ([]byte, int, erro
 	}
 	req.Header.Set("Content-Type", "application/json")
 	s.attachCaptureServiceToken(req)
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := upstreamHTTPClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err

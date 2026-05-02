@@ -28,6 +28,17 @@ import (
 const maxTokenBodyBytes = 4096
 const maxProxyBodyBytes = 1 << 20
 
+// upstreamHTTPClient is used for outbound calls to BFF / engine / route / capture control planes.
+// Redirects are not followed so misconfigured upstreams cannot silently change the request target.
+func upstreamHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 // Server is the console HTTP server.
 type Server struct {
 	cfg      *config.Config
@@ -425,7 +436,7 @@ func (s *Server) handleBFFProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	s.attachBFFProxyServiceToken(req)
 
-	client := &http.Client{Timeout: 12 * time.Second}
+	client := upstreamHTTPClient(12 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"bff proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
@@ -1111,7 +1122,7 @@ func (s *Server) handleRouteMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.attachRouteServiceToken(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := upstreamHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"route metrics proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
@@ -1186,7 +1197,7 @@ func (s *Server) handleSwitchState(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	s.attachEngineServiceToken(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := upstreamHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"engine switch state proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
@@ -1251,7 +1262,7 @@ func (s *Server) proxyEngineControl(w http.ResponseWriter, r *http.Request, path
 	}
 	req.Header.Set("Content-Type", "application/json")
 	s.attachEngineServiceToken(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := upstreamHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"engine switch proxy failed: %s"}`, trimErr(err)), http.StatusBadGateway)
@@ -1814,7 +1825,7 @@ func (s *Server) routeControlGET(path string) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	s.attachRouteServiceToken(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := upstreamHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err
@@ -1836,7 +1847,7 @@ func (s *Server) engineControlGET(path string) ([]byte, int, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	s.attachEngineServiceToken(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := upstreamHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err
@@ -1858,7 +1869,7 @@ func (s *Server) engineControlPOST(path string, body []byte) ([]byte, int, error
 	}
 	req.Header.Set("Content-Type", "application/json")
 	s.attachEngineServiceToken(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := upstreamHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err
@@ -1905,7 +1916,7 @@ func (s *Server) routeControlPOST(path string, body []byte) ([]byte, int, error)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	s.attachRouteServiceToken(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := upstreamHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err

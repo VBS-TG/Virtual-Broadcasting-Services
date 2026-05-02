@@ -64,6 +64,15 @@ type accessJWTClaims struct {
 	jwt.RegisteredClaims
 }
 
+func newJWKSHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 8 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duration, clockSkewLeeway time.Duration, adminEmails []string, nodeCNPrefix, routeClientID, engineClientID, captureClientID, bffClientID, consoleIssuer, consolePrivateKey string, consolePublicKeys []string) (*AccessJWTVerifier, error) {
 	if strings.TrimSpace(aud) == "" {
 		return nil, fmt.Errorf("VBS_CF_ACCESS_AUD (or VBS_CF_AUD) is required")
@@ -117,7 +126,7 @@ func NewAccessJWTVerifier(teamDomain, aud, jwksURL string, cacheTTL time.Duratio
 		cfAud:         strings.TrimSpace(aud),
 		cfJWKSURL:     resolvedJWKSURL,
 		cacheTTL:      cacheTTL,
-		httpClient:    &http.Client{Timeout: 8 * time.Second},
+		httpClient:    newJWKSHTTPClient(),
 		adminEmailSet: adminSet,
 		nodeCNPrefix:  nodeCNPrefix,
 		serviceRoleByCN: serviceRoleByCN,
