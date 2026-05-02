@@ -18,12 +18,15 @@ export default {
     }
 
     if (path.startsWith("/api/")) {
+      const hasHumanToken = Boolean(String(request.headers.get("x-vbs-authorization") || "").trim());
       return proxyToUpstream(request, env, {
         upstreamOrigin: env.API_ORIGIN,
         requestOrigin: origin,
         stripPrefix: "",
-        serviceClientID: env.API_CF_ACCESS_CLIENT_ID || env.CF_ACCESS_CLIENT_ID || "",
-        serviceClientSecret: env.API_CF_ACCESS_CLIENT_SECRET || env.CF_ACCESS_CLIENT_SECRET || "",
+        // For protected API calls with human JWT, avoid service-token shadowing.
+        // For pre-auth endpoints (e.g. admin login), inject API service token.
+        serviceClientID: hasHumanToken ? "" : (env.API_CF_ACCESS_CLIENT_ID || env.CF_ACCESS_CLIENT_ID || ""),
+        serviceClientSecret: hasHumanToken ? "" : (env.API_CF_ACCESS_CLIENT_SECRET || env.CF_ACCESS_CLIENT_SECRET || ""),
       });
     }
 

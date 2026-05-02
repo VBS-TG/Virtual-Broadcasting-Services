@@ -10,10 +10,10 @@ RTC_ORIGIN = "https://vbsrtc.cyblisswisdom.org"
 # Optional path-routed upstreams on same domain gateway:
 # - /engine/* -> ENGINE_ORIGIN/*
 # - /route/*  -> ROUTE_ORIGIN/*
-ENGINE_ORIGIN = "https://vbsrtc.cyblisswisdom.org"
+ENGINE_ORIGIN = "https://vbsengine.cyblisswisdom.org"
 # NOTE: set this to a reachable Route control origin before enabling /route*.
 # Example: ROUTE_ORIGIN = "http://<route-public-ip-or-dns>:20080"
-ROUTE_ORIGIN = "http://43.213.145.78:20080"
+ROUTE_ORIGIN = "https://vbsroute.cyblisswisdom.org"
 ALLOWED_ORIGIN = "https://vbs.cyblisswisdom.org"
 
 # Set routes after first deploy (adjust zone/route as needed), e.g.:

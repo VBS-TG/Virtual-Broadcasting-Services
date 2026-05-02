@@ -53,19 +53,21 @@ interface PresenceRecord {
 let adminRefreshInFlight: Promise<boolean> | null = null
 
 function getAuthToken(): string {
-  const fromStore = String(useAuthStore.getState().user?.token ?? '').trim()
-  if (fromStore) return fromStore
-  if (typeof window === 'undefined') return ''
-
-  try {
-    const raw = window.localStorage.getItem('vbs-auth')
-    if (!raw) return ''
-    const parsed = JSON.parse(raw)
-    const token = String(parsed?.state?.user?.token ?? '').trim()
-    return token
-  } catch {
-    return ''
+  // Prefer localStorage first: zustand persist may not have rehydrated in-memory state yet
+  // on first paint after refresh/login redirect, which would otherwise trigger false 401s.
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.localStorage.getItem('vbs-auth')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        const token = String(parsed?.state?.user?.token ?? '').trim()
+        if (token) return token
+      }
+    } catch {
+      // fall through to store
+    }
   }
+  return String(useAuthStore.getState().user?.token ?? '').trim()
 }
 
 function normalizeApiError(payload: any, status: number): string {
