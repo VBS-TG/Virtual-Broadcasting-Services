@@ -8,6 +8,8 @@ var telemetrySenderRoles = map[string]struct{}{
 	"route":   {},
 	"engine":  {},
 	"console": {},
+	"admin":   {},
+	"guest":   {},
 }
 
 func IsTelemetryRole(role string) bool {

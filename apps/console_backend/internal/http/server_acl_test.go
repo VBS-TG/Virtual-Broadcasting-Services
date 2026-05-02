@@ -14,6 +14,8 @@ func TestServicePathAllowed(t *testing.T) {
 		{name: "bff proxy allowed", role: "bff", method: "GET", path: "/api/proxy/api/v1/route/metrics", want: true},
 		{name: "bff direct api denied", role: "bff", method: "GET", path: "/api/v1/route/metrics", want: false},
 		{name: "engine telemetry ws allowed", role: "engine", method: "GET", path: "/vbs/telemetry/ws", want: true},
+		{name: "admin telemetry ws allowed", role: "admin", method: "GET", path: "/vbs/telemetry/ws", want: true},
+		{name: "guest telemetry ws allowed", role: "guest", method: "GET", path: "/vbs/telemetry/ws", want: true},
 		{name: "engine events denied", role: "engine", method: "GET", path: "/vbs/telemetry/events/ws", want: false},
 		{name: "route introspect allowed", role: "route", method: "POST", path: "/api/v1/guest/introspect", want: true},
 		{name: "route introspect wrong method denied", role: "route", method: "GET", path: "/api/v1/guest/introspect", want: false},

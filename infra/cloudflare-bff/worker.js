@@ -9,6 +9,9 @@
  *
  * No auth injection or header stripping beyond deleting Host (required for upstream fetch).
  * Identity is enforced at Cloudflare Access (network) and console_backend (application).
+ *
+ * WebSocket: requests with Upgrade: websocket are forwarded with fetch(); the runtime
+ * handles 101 Switching Protocols and tunnels the socket to the upstream.
  */
 export default {
   async fetch(request, env) {
@@ -82,6 +85,14 @@ async function proxyToUpstream(request, env, opts) {
 
   const headers = new Headers(request.headers);
   headers.delete("host");
+
+  if (String(request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
+    return fetch(upstreamUrl.toString(), {
+      headers,
+      method: request.method,
+      redirect: "manual",
+    });
+  }
 
   const init = {
     method: request.method,

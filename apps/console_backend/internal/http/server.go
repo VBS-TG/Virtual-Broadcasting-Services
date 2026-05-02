@@ -322,7 +322,7 @@ var serviceACLRules = []serviceACLRule{
 		prefixes: []string{"/api/proxy/"},
 	},
 	{
-		roles:    set("node", "route", "engine", "capture", "console"),
+		roles:    set("node", "route", "engine", "capture", "console", "admin", "guest"),
 		methods:  methodSet(http.MethodGet),
 		prefixes: []string{"/vbs/telemetry/ws"},
 	},
