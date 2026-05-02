@@ -11,10 +11,23 @@ export default function PipelinePage() {
   const runtime = useRuntimeStore((s) => s.config)
   const fetchRuntime = useRuntimeStore((s) => s.fetch)
 
+  const currentPGMCount = Math.max(1, runtime?.pgm_count ?? 1)
+  const currentAuxCount = Math.max(0, Math.min(4, runtime?.aux_count ?? 0))
+
+  const [pendingPGMCount, setPendingPGMCount] = useState(1)
+  const [pendingAUXCount, setPendingAUXCount] = useState(0)
+  const [pendingAuxSources, setPendingAuxSources] = useState<Record<string, string>>({})
+
   useEffect(() => {
     fetch()
     fetchRuntime()
   }, [fetch, fetchRuntime])
+
+  useEffect(() => {
+    setPendingPGMCount(currentPGMCount)
+    setPendingAUXCount(currentAuxCount)
+    setPendingAuxSources(runtime?.aux_sources ?? {})
+  }, [currentPGMCount, currentAuxCount, runtime?.aux_sources])
 
   if (loading && !draft) {
     return (
@@ -39,17 +52,6 @@ export default function PipelinePage() {
   const t = draft.profile.target ?? { width: 1920, height: 1080, frame_rate: 60 }
   const runtimeInputs = Math.max(1, Math.min(8, runtime?.inputs ?? 8))
   const sourceOptions = Array.from({ length: 8 }, (_, i) => `input${i + 1}`)
-  const currentAuxCount = Math.max(0, Math.min(4, runtime?.aux_count ?? 0))
-  const currentPGMCount = Math.max(1, runtime?.pgm_count ?? 1)
-  const [pendingPGMCount, setPendingPGMCount] = useState(currentPGMCount)
-  const [pendingAUXCount, setPendingAUXCount] = useState(currentAuxCount)
-  const [pendingAuxSources, setPendingAuxSources] = useState<Record<string, string>>(runtime?.aux_sources ?? {})
-
-  useEffect(() => {
-    setPendingPGMCount(currentPGMCount)
-    setPendingAUXCount(currentAuxCount)
-    setPendingAuxSources(runtime?.aux_sources ?? {})
-  }, [currentPGMCount, currentAuxCount, runtime?.aux_sources])
 
   const setInputLabel = (slot: number, label: string) => {
     const key = `input${slot}`
