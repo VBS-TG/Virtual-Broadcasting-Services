@@ -1852,6 +1852,7 @@ func (s *Server) engineControlGET(path string) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	log.Printf("[engine-debug] GET %s -> status=%d", path, resp.StatusCode)
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
