@@ -7,9 +7,15 @@ import { getTelemetryIngestWebSocketUrl, postCaptureBitrate, postCaptureReboot, 
 import { useOperationLogStore } from '../stores/operationLogStore'
 
 export default function Telemetry() {
-  const { autoRefresh, setAutoRefresh, fetch, refreshInterval, setRefreshInterval, error } =
-    useTelemetryStore()
-  const data = useTelemetryStore((s) => s.data)
+  const {
+    autoRefresh,
+    setAutoRefresh,
+    fetch,
+    refreshInterval,
+    setRefreshInterval,
+    error,
+    data,
+  } = useTelemetryStore()
   const [captureBitrate, setCaptureBitrate] = useState(3500)
   const [routeLatency, setRouteLatency] = useState(2000)
   const [routeLossTTL, setRouteLossTTL] = useState(40)

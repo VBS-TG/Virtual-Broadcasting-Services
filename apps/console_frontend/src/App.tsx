@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 import Sidebar from './components/Sidebar'
@@ -16,7 +17,16 @@ import './index.css'
 import './App.css'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const isLoggedIn = useAuthStore((s) => s.isLoggedIn())
+  const user = useAuthStore((s) => s.user)
+  const isLoggedIn =
+    user != null && (user.expiresAt == null || user.expiresAt > Date.now())
+
+  useEffect(() => {
+    if (user && user.expiresAt != null && user.expiresAt <= Date.now()) {
+      useAuthStore.getState().logout()
+    }
+  }, [user])
+
   if (!isLoggedIn) return <Navigate to="/login" replace />
   return <>{children}</>
 }
