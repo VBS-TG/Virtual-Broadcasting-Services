@@ -207,7 +207,7 @@ func (s *Server) authorizeServiceRequest(r *http.Request) error {
 	hasHumanAuthHeader := strings.TrimSpace(r.Header.Get("X-VBS-Authorization")) != "" || strings.TrimSpace(r.Header.Get("Authorization")) != ""
 	claims, err := s.access.VerifyRequestPreferBearer(r)
 	if err != nil {
-		log.Printf("[auth-debug][middleware] authz=%q x_vbs_authz=%q cf_jwt=%q role=<verify_error> err=%v", authzPreview, xVBSAuthzPreview, cfJWTPreview, err)
+		log.Printf("[auth-debug][middleware] method=%s path=%s authz=%q x_vbs_authz=%q cf_jwt=%q role=<verify_error> err=%v", r.Method, r.URL.Path, authzPreview, xVBSAuthzPreview, cfJWTPreview, err)
 		if hasHumanAuthHeader {
 			// Fail fast: explicit human token must verify or return 401.
 			return fmt.Errorf("unauthorized: %w", err)
@@ -216,7 +216,7 @@ func (s *Server) authorizeServiceRequest(r *http.Request) error {
 		return nil
 	}
 	role := strings.TrimSpace(strings.ToLower(claims.Role))
-	log.Printf("[auth-debug][middleware] authz=%q x_vbs_authz=%q cf_jwt=%q role=%q", authzPreview, xVBSAuthzPreview, cfJWTPreview, role)
+	log.Printf("[auth-debug][middleware] method=%s path=%s authz=%q x_vbs_authz=%q cf_jwt=%q role=%q", r.Method, r.URL.Path, authzPreview, xVBSAuthzPreview, cfJWTPreview, role)
 	if role == "guest" {
 		return nil
 	}
