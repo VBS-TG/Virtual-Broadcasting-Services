@@ -3,6 +3,7 @@
  *
  * Routes:
  * - /api/*    -> API_ORIGIN/*
+ * - /vbs/*    -> API_ORIGIN/* (telemetry ingest WSS, etc.; SPA hostname MUST route here — see README)
  * - /whep/*   -> RTC_ORIGIN/*
  * - /engine/* -> ENGINE_ORIGIN/* (strips /engine prefix)
  * - /route/*  -> ROUTE_ORIGIN/*  (strips /route prefix)

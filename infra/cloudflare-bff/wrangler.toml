@@ -17,13 +17,13 @@ ENGINE_ORIGIN = "https://vbsengine.cyblisswisdom.org"
 ROUTE_ORIGIN = "https://vbsroute.cyblisswisdom.org"
 ALLOWED_ORIGIN = "https://vbs.cyblisswisdom.org"
 
-# Set routes after first deploy (adjust zone/route as needed). The Worker MUST handle
-# /vbs/* on the same hostname the SPA uses; otherwise WSS to /vbs/telemetry/ws hits Pages
-# and returns HTTP 200 (HTML) instead of 101 — browser: "Unexpected response code: 200".
-# routes = [
-#   { pattern = "vbs.cyblisswisdom.org/api/*", zone_name = "cyblisswisdom.org" },
-#   { pattern = "vbs.cyblisswisdom.org/vbs/*", zone_name = "cyblisswisdom.org" },
-#   { pattern = "vbs.cyblisswisdom.org/whep/*", zone_name = "cyblisswisdom.org" },
-#   { pattern = "vbsapi.cyblisswisdom.org/engine*", zone_name = "cyblisswisdom.org" },
-#   { pattern = "vbsapi.cyblisswisdom.org/route*", zone_name = "cyblisswisdom.org" }
-# ]
+# Worker must receive /vbs/* on the SPA hostname; otherwise WSS gets Pages HTML (HTTP 200).
+# Deploy: cd infra/cloudflare-bff && npx wrangler deploy
+# If routes conflict with dashboard, remove duplicates there or adjust zone_name.
+routes = [
+  { pattern = "vbs.cyblisswisdom.org/api/*", zone_name = "cyblisswisdom.org" },
+  { pattern = "vbs.cyblisswisdom.org/vbs/*", zone_name = "cyblisswisdom.org" },
+  { pattern = "vbs.cyblisswisdom.org/whep/*", zone_name = "cyblisswisdom.org" },
+  { pattern = "vbsapi.cyblisswisdom.org/engine*", zone_name = "cyblisswisdom.org" },
+  { pattern = "vbsapi.cyblisswisdom.org/route*", zone_name = "cyblisswisdom.org" },
+]

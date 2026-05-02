@@ -70,14 +70,14 @@ function getAuthToken(): string {
   return String(useAuthStore.getState().user?.token ?? '').trim()
 }
 
-/** Optional override: e.g. `https://vbsapi.example.com` */
+/**
+ * Optional: override WSS origin (e.g. direct `https://vbsapi.example.com` for staging).
+ * Production: omit — use same origin so `wss://<spa-host>/vbs/telemetry/ws` goes through
+ * Cloudflare BFF (`infra/cloudflare-bff`); Worker routes must include `/vbs/*` on the SPA hostname.
+ */
 const VITE_VBS_TELEMETRY_WS_ORIGIN = String(
   import.meta.env.VITE_VBS_TELEMETRY_WS_ORIGIN ?? ''
 ).trim()
-
-/** When SPA is on Pages at `vbs.*` but Worker does not route `/vbs/*`, same-origin WSS returns HTTP 200 (HTML). Point WSS at Console API host (same as BFF `API_ORIGIN`). */
-const PROD_SPA_HOST_FALLBACK = 'vbs.cyblisswisdom.org'
-const PROD_CONSOLE_API_ORIGIN_FALLBACK = 'https://vbsapi.cyblisswisdom.org'
 
 function telemetryIngestWsBaseOrigin(): string {
   if (VITE_VBS_TELEMETRY_WS_ORIGIN) {
@@ -86,9 +86,6 @@ function telemetryIngestWsBaseOrigin(): string {
     } catch {
       // fall through
     }
-  }
-  if (typeof window !== 'undefined' && window.location.hostname === PROD_SPA_HOST_FALLBACK) {
-    return new URL(PROD_CONSOLE_API_ORIGIN_FALLBACK).origin
   }
   return typeof window !== 'undefined' ? window.location.origin : ''
 }

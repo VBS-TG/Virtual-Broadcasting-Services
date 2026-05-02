@@ -162,9 +162,10 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 
 ### Cloudflare BFF（`infra/cloudflare-bff`，Workers）
 
-- **僅轉發**：依路徑將 `/api/*`、`/whep/*`、`/engine/*`、`/route/*` 對應到 `API_ORIGIN`、`RTC_ORIGIN`、`ENGINE_ORIGIN`、`ROUTE_ORIGIN`；**不**在 Worker 內注入 `Cf-Access-Client-Id`／`Secret`，**不**依 `X-VBS-Authorization` 分支。
-- 請求標頭除 **`Host`**（須配合上游 URL）外 **原樣**轉發；`redirect: manual`，並對上游 `3xx` 做固定錯誤回應以免瀏覽器盲目跟隨。
-- **網路層**：Cloudflare Access／Tunnel 政策決定能否連到各 origin；**應用層**：瀏覽器 API 使用 **`X-VBS-Authorization`**（Console 簽發 JWT），由 **console_backend** 驗證。
+- **僅轉發**：依路徑將 **`/api/*`**、**`/vbs/*`**、`/whep/*`、`/engine/*`、`/route/*` 對應到 `API_ORIGIN`、`API_ORIGIN`、`RTC_ORIGIN`、`ENGINE_ORIGIN`、`ROUTE_ORIGIN`；**不**在 Worker 內注入 `Cf-Access-Client-Id`／`Secret`，**不**依 `X-VBS-Authorization` 分支。
+- **`/vbs/*`（含遙測 ingest WebSocket）與 `/api/*` 同一上游（Console）**：瀏覽器應使用 **同源** `wss://<SPA 網域>/vbs/telemetry/ws?token=…`（無法自訂 WS Header，故 token 走 query），由 Worker `fetch` 轉發 **`Upgrade: websocket`** 至 `API_ORIGIN`。**必須**在 Cloudflare 將 **`{SPA 網域}/vbs/*`** 綁定至此 Worker（`wrangler.toml` 的 `routes` 需含該 pattern 並執行 **`wrangler deploy`**）；若未綁定，請求會落到 **Pages** 而回 **HTTP 200（HTML）**，無法 **101** 升級。
+- 請求標頭除 **`Host`**（須配合上游 URL）外 **原樣**轉發；`redirect: manual`，並對上游 `3xx` 做固定錯誤回應以免瀏覽器盲目跟隨（WebSocket 升級請求另行直傳，不包 CORS 包裝）。
+- **網路層**：Cloudflare Access／Tunnel 政策決定能否連到各 origin；**應用層**：瀏覽器 REST 使用 **`X-VBS-Authorization`**（Console 簽發 JWT），由 **console_backend** 驗證；同源 WSS 遙測 ingest 使用 **`?token=`** 同值 JWT。
 
 ### 環境變數（Console 行程）
 
@@ -201,7 +202,7 @@ Console 為 **Cloudflare JWT 驗證閘道**、**遙測 WSS ingest**、**Runtime 
 | Service / Port | Protocol | Endpoint | Auth Mode | Node Context |
 | --- | --- | --- | --- | --- |
 | Console-HTTP / 4000 | HTTP | `GET /healthz` | 無 | 健康檢查 |
-| Console-Telemetry | WS/WSS | `GET /vbs/telemetry/ws`（Upgrade） | `Authorization: Bearer <Cloudflare Access JWT>`；驗簽後以 `common_name` 前綴映射為 node 身分 | Route/Engine/Capture → Console |
+| Console-Telemetry | WS/WSS | `GET /vbs/telemetry/ws`（Upgrade） | **節點**：`Cf-Access-Jwt-Assertion`（或經 Access 之 Bearer）；**瀏覽器**：`?token=<Console JWT>`（與 `X-VBS-Authorization` 同顆）；皆由 **console_backend** 驗證；節點身分映射見 Access／`common_name` 規則 | Route/Engine/Capture／Browser → Console |
 | Console-Telemetry-Events | WS/WSS | `GET /vbs/telemetry/events/ws`（Upgrade） | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/guest | Console → UI（online/offline 狀態事件） |
 | Console-HTTP / 4000 | HTTP | `GET /api/v1/telemetry/latest` | `Authorization: Bearer <JWT>`（Cloudflare 或 Console 簽發 Guest）；需映射為 admin/guest | 讀取每節點最近一次遙測（內存 + presence） |
 | Console-HTTP / 4000 | HTTP | `POST /api/v1/stream/session-key` | `Authorization: Bearer <Cloudflare Access JWT>`；需映射為 admin | 生成當次直播 SRT AES-256 passphrase |
