@@ -70,6 +70,11 @@ function getAuthToken(): string {
   return String(useAuthStore.getState().user?.token ?? '').trim()
 }
 
+/** Optional: e.g. `https://vbsapi.example.com` so WSS hits Console API directly when Pages hostname does not proxy `/vbs/*` (avoids handshake HTTP 200 from SPA). */
+const VITE_VBS_TELEMETRY_WS_ORIGIN = String(
+  import.meta.env.VITE_VBS_TELEMETRY_WS_ORIGIN ?? ''
+).trim()
+
 /** Browser WebSocket to telemetry ingest: same token as `X-VBS-Authorization` (query `token` because WS cannot set custom headers). */
 export function getTelemetryIngestWebSocketUrl(): string | null {
   if (typeof window === 'undefined') {
@@ -79,7 +84,15 @@ export function getTelemetryIngestWebSocketUrl(): string | null {
   if (!token) {
     return null
   }
-  const u = new URL('/vbs/telemetry/ws', window.location.origin)
+  let baseUrl = window.location.origin
+  if (VITE_VBS_TELEMETRY_WS_ORIGIN) {
+    try {
+      baseUrl = new URL(VITE_VBS_TELEMETRY_WS_ORIGIN).origin
+    } catch {
+      // keep window.location.origin
+    }
+  }
+  const u = new URL('/vbs/telemetry/ws', baseUrl)
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:'
   u.searchParams.set('token', token)
   return u.toString()

@@ -12,6 +12,9 @@
  *
  * WebSocket: requests with Upgrade: websocket are forwarded with fetch(); the runtime
  * handles 101 Switching Protocols and tunnels the socket to the upstream.
+ *
+ * Deploy: bind this Worker to vbs.cyblisswisdom.org/vbs/* (not only /api/*). If /vbs/*
+ * is not routed here, the browser may receive HTTP 200 HTML from Pages (SPA), not 101.
  */
 export default {
   async fetch(request, env) {
